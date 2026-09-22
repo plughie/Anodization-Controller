@@ -5,6 +5,10 @@ firmware pseudocode from the design note; hardware drivers, validation,
 fault-handling implementation, and safety review are still required.
 """
 
+# Copyright © 2026 Duv McIntyre
+# SPDX-License-Identifier: CC-BY-4.0
+# Bug-Mag.net project: http://bug-mag.net
+
 PALETTE = [                      # name,      V_low, V_high
     ("BRONZE",   15, 18), ("VIOLET",   20, 25),
     ("BLUE",     30, 40), ("TEAL",     45, 50),
