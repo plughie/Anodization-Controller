@@ -12,6 +12,17 @@ tags: [project/anodizer, electronics, hardware, safety]
 
 **Status:** untested conceptual design. Nothing has been built or validated on hardware. Every number below is calculated or sourced, not measured; no value is an approved operating limit.
 
+**Controller target:** Raspberry Pi Pico WH (Pico 1 / RP2040 with
+pre-soldered headers and wireless). The wireless radio is not part of the
+conceptual safety path; the GPIO and isolation assignments remain the same as
+the Pico 1 prototype.
+
+The repository simulator mirrors these front-panel controls: use **SELECT
+(hold 1 s)** to start a run after configuring the manual supply and closed
+interlocks, and use **BACK** to disable output and begin a graceful retract.
+This is a UI demonstration only; it does not implement the physical Pico
+firmware or provide a safety-rated control path.
+
 ---
 
 ## 1. What the machine does
@@ -224,7 +235,7 @@ All precision analog is off-chip — the ADS1115 measures, the TMC2209 handles m
 
 | Chip | Dev board | SMT availability | Porting cost |
 |---|---|---|---|
-| RP2040 | Pico / Pico H | QFN-56, [JLCPCB C2761095](https://jlcpcb.com/partdetail/RaspberryPi-RP2040/C2761095) | Zero — GPIO numbering matches |
+| RP2040 | Pico / Pico H / Pico WH | QFN-56, [JLCPCB C2761095](https://jlcpcb.com/partdetail/RaspberryPi-RP2040/C2761095) | Zero — GPIO numbering matches |
 | RP2354A | Pico 2 | QFN-60, **2 MB on-die flash**, no external QSPI ([brief](https://www.mouser.com/datasheet/2/635/Raspberry_Pi_05_22_2025_rp2350_product_brief-3600627.pdf)) | Near zero |
 | ESP32-S3-WROOM-1 | DevKitC-1 | Pre-certified module ~$4, [JLCPCB C2913201](https://jlcpcb.com/partdetail/3198299-ESP32_S3_WROOM_1_N8R8/C2913201) | Moderate rewrite; gains Wi-Fi logging |
 | STM32G071C8 | Nucleo-G071RB | [LQFP-48](https://jlcpcb.com/partdetail/STMicroelectronics-STM32G071C8T6/C529341), hand-reworkable | Full C/HAL rewrite |
@@ -245,7 +256,7 @@ Extended parts carry a per-type feeder fee, so consolidate passive values and pr
 
 The earlier **$290–330** estimate is no longer reliable because the regulator, protection front end, contactor, ballast, fuse, and isolation test requirements are still TBD. Treat all pricing as provisional until the schematic and hazard analysis are complete.
 
-Key line items remain indicative: [ADS1115 breakout](https://www.adafruit.com/product/1085), [TMC2209 breakout](https://www.adafruit.com/product/6121), [Pico H](https://www.sparkfun.com/raspberry-pi-pico-h.html), and [NEMA 17 with T8 screw](https://www.ebay.com/itm/186502889154). Full provisional itemization is in [anodizer-controller-design.md](anodizer-controller-design.md).
+Key line items remain indicative: [ADS1115 breakout](https://www.adafruit.com/product/1085), [TMC2209 breakout](https://www.adafruit.com/product/6121), [Pico WH](https://www.raspberrypi.com/products/raspberry-pi-pico/), and [NEMA 17 with T8 screw](https://www.ebay.com/itm/186502889154). Full provisional itemization is in [anodizer-controller-design.md](anodizer-controller-design.md).
 
 ---
 

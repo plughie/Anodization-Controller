@@ -8,6 +8,8 @@ verified.
 # Copyright © 2026 Duv McIntyre
 # SPDX-License-Identifier: CC-BY-4.0
 # Bug-Mag.net project: http://bug-mag.net
+# Target controller board: Raspberry Pi Pico WH (Pico 1 / RP2040, headers + wireless).
+# The wireless radio is intentionally unused by this conceptual control path.
 
 PALETTE = [                      # name,      V_low, V_high
     ("BRONZE",   15, 18), ("VIOLET",   20, 25),

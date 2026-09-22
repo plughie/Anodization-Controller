@@ -17,11 +17,27 @@ This is a [Bug-Mag.net project](http://bug-mag.net) by Duv McIntyre.
 - `anodizer-controller-design.md` — circuit design, BOM, UI, and firmware sketch.
 - `titanium-anodizing-automation.md` — process, motion, power-supply, and safety notes.
 - `controller_firmware.py` — Python-formatted extraction of the palette and firmware pseudocode from the controller design note.
+- `simulator.html` — browser simulator for the manual supply, Pico WH controller logic, and lift actuator.
+
+The conceptual controller target is a **Raspberry Pi Pico WH** (the Pico 1
+family with pre-soldered headers and wireless). The simulator exposes the same
+board target and GPIO map used by the design notes; its Wi-Fi/BLE radio is not
+used by this conceptual control path.
 
 The Python file is a design artifact, not runnable production firmware. It
 contains undefined hardware interfaces and deliberately fails closed in the
 illustrative control flow; it must not be connected to hardware without a
 complete electrical, firmware, and safety review.
+
+## Simulator
+
+Open [`simulator.html`](simulator.html) in a modern browser. Set the manual
+bench-supply voltage and current limit, enable the simulated output, and press
+**SELECT (hold 1 s)** to begin the conceptual run. **BACK** disables the
+output and starts a graceful retract during an active run; **Reset** clears a
+latched fault or returns the simulator to idle. The simulator includes the
+Pico WH front-panel controls, controller display, actuator position, and
+voltage/current trace.
 
 ## Safety
 

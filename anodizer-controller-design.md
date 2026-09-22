@@ -1,6 +1,6 @@
 # Titanium Anodizing Lift Controller — Circuit Design and BOM
 
-**Configuration:** you own a 0–120 V / 3 A supply and will adjust its voltage **by hand**. The Pico 1 H therefore never commands voltage. It reads the actual cell voltage, and drives the lift axis to the position that voltage should correspond to.
+**Configuration:** you own a 0–120 V / 3 A supply and will adjust its voltage **by hand**. The Raspberry Pi Pico WH therefore never commands voltage. It reads the actual cell voltage, and drives the lift axis to the position that voltage should correspond to.
 
 **Status:** untested conceptual design. The circuit, protection system, firmware, motion geometry, and process limits are not validated for construction or energized operation.
 
@@ -39,7 +39,7 @@ That inverts the usual design and deletes most of the expensive parts: no DAC in
    └──────────────────────────────┘                       ║
                                                           ║
    ┌──────────────────────────────────────────────────────╝
-   │  RASPBERRY PI PICO 1 H  (3V3, earth/USB side)
+   │  RASPBERRY PI PICO WH  (Pico 1 / RP2040, headers + wireless)
    │   GP0/1    I²C0 → ISO1541 → ADS1115
    │   GP2/3/4  STEP / DIR / EN → TMC2209
    │   GP8/9    UART1 → TMC2209 (StallGuard, current set)
@@ -51,6 +51,7 @@ That inverts the usual design and deletes most of the expensive parts: no DAC in
    │   GP18/19  rotary encoder A / B
    │   GP20     SELECT button
    │   GP21     BACK button
+   │   GP22     hardware fault IRQ
    └──────────────────────────────────────────────────────
               │
        TMC2209 ──► NEMA 17 + 150 mm T8 lead screw
@@ -495,7 +496,7 @@ Log `t, pos, v, v_peak, i`, interlock state, and the active recipe to CSV over U
 
 | Qty | Part | Purpose | Approx. each |
 |---:|---|---|---:|
-| 1 | Raspberry Pi Pico 1 H | Controller | $5.50 ([SparkFun](https://www.sparkfun.com/raspberry-pi-pico-h.html)) |
+| 1 | Raspberry Pi Pico WH (RP2040, headers + wireless) | Controller | price TBD ([Raspberry Pi](https://www.raspberrypi.com/products/raspberry-pi-pico/)) |
 | 1 | ADS1115 16-bit ADC breakout | Cell voltage, shunt current | $15 ([Adafruit](https://www.adafruit.com/product/1085)) |
 | 1 | ISO1541DR | Isolated I²C barrier | ~$3 |
 | 1 | TRACO TMR 0522 (5 V → ±12 V, 2 W) | Isolated sense-side supply | ~$20 |
@@ -583,7 +584,7 @@ One design decision already made this easy: **all the precision analog lives off
 
 | Chip | Dev board | SMT part | Package | External parts needed | Port cost from your prototype |
 |---|---|---|---|---|---|
-| **RP2040** | Pico / Pico H | QFN-56, 7×7 mm, stocked as [JLCPCB C2761095](https://jlcpcb.com/partdetail/RaspberryPi-RP2040/C2761095) | QFN-56, centre ground pad | QSPI flash, 12 MHz crystal + 2 caps, 3V3 LDO, BOOTSEL button, ~6 decouplers | **Zero.** Same GPIO numbering as the Pico, same SDK |
+| **RP2040** | Pico / Pico H / Pico WH | QFN-56, 7×7 mm, stocked as [JLCPCB C2761095](https://jlcpcb.com/partdetail/RaspberryPi-RP2040/C2761095) | QFN-56, centre ground pad | QSPI flash, 12 MHz crystal + 2 caps, 3V3 LDO, BOOTSEL button, ~6 decouplers | **Zero.** Same GPIO numbering as the Pico, same SDK |
 | **RP2354A** | Pico 2 | QFN-60 | QFN-60 | **No external flash** — 2 MB is on-die. Crystal, LDO, caps only | Near zero; SDK is shared |
 | **ESP32-S3-WROOM-1** | ESP32-S3-DevKitC-1 | Pre-certified module, ~$4 at [JLCPCB](https://jlcpcb.com/partdetail/3198299-ESP32_S3_WROOM_1_N8R8/C2913201) | Castellated module, one placement | Essentially none — flash, PSRAM, crystal and antenna are inside | Moderate rewrite; gains Wi-Fi |
 | **STM32G071C8** | Nucleo-G071RB | [LQFP-48](https://jlcpcb.com/partdetail/STMicroelectronics-STM32G071C8T6/C529341) | **LQFP-48 — hand-solderable and reworkable** | Crystal optional (internal osc is adequate here), LDO, caps | Full rewrite in C/HAL |
@@ -616,5 +617,5 @@ One design decision already made this easy: **all the precision analog lives off
 - [TI ISO1541 isolated I²C datasheet](https://www.ti.com/lit/ds/symlink/iso1541.pdf)
 - [Vishay IRFP460 datasheet](https://www.vishay.com/docs/91237/91237.pdf)
 - [TRACO TMR 2 series datasheet](https://www.tracopower.com/tmr2-datasheet)
-- [Adafruit ADS1115](https://www.adafruit.com/product/1085) · [Adafruit TMC2209 breakout](https://www.adafruit.com/product/6121) · [Raspberry Pi Pico H](https://www.sparkfun.com/raspberry-pi-pico-h.html)
+- [Adafruit ADS1115](https://www.adafruit.com/product/1085) · [Adafruit TMC2209 breakout](https://www.adafruit.com/product/6121) · [Raspberry Pi Pico WH](https://www.raspberrypi.com/products/raspberry-pi-pico/)
 - Process background: [AMS-2471 current density notes](https://titanium.blog/standards/ams-2471/), [Caswell plating manual](https://tosih.org/files/books/caswell_inc_plating_manual.pdf)

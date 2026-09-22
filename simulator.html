@@ -1,0 +1,471 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Anodization Controller Simulator</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0d1117;
+      --panel: #151c25;
+      --panel-2: #1b2530;
+      --line: #334454;
+      --text: #e6edf3;
+      --muted: #9eacb9;
+      --cyan: #56d6e9;
+      --green: #65d68a;
+      --yellow: #f1c75b;
+      --red: #ff7676;
+      --purple: #bb9cff;
+      --orange: #f5a65b;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: radial-gradient(circle at 50% -20%, #203246 0, var(--bg) 55%);
+      color: var(--text);
+      font: 15px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    main { max-width: 1180px; margin: 0 auto; padding: 24px; }
+    h1, h2, h3, p { margin-top: 0; }
+    h1 { font-size: clamp(1.4rem, 3vw, 2.2rem); margin-bottom: 4px; }
+    h2 { font-size: 1rem; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+    button, input, select { font: inherit; }
+    button { cursor: pointer; }
+    .warning {
+      border: 1px solid #7e5d2d; background: #2a2113; color: #ffe5ab;
+      border-radius: 10px; padding: 10px 12px; margin: 18px 0;
+    }
+    .layout { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 18px; }
+    .panel { background: color-mix(in srgb, var(--panel) 94%, transparent); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
+    .panel + .panel { margin-top: 14px; }
+    .hardware-id { color: var(--cyan); font-size: 1.05rem; font-weight: 650; }
+    .pin-grid { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; margin-top: 12px; font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .pin-grid span:nth-child(odd) { color: var(--yellow); }
+    .control { margin: 16px 0 20px; }
+    .control-head, .metric, .status-line, .toolbar { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
+    .control-head { margin-bottom: 7px; }
+    .value { color: var(--cyan); font-variant-numeric: tabular-nums; font-weight: 600; }
+    .muted { color: var(--muted); }
+    input[type="range"] { width: 100%; accent-color: var(--cyan); }
+    input[type="number"], select {
+      width: 100%; color: var(--text); background: var(--panel-2); border: 1px solid var(--line);
+      border-radius: 7px; padding: 8px;
+    }
+    .supply-knob {
+      width: 142px; height: 142px; border-radius: 50%; margin: 4px auto 12px;
+      display: grid; place-items: center; position: relative;
+      background: conic-gradient(from 225deg, var(--cyan) calc(var(--pct) * 270deg), #273746 0);
+      box-shadow: inset 0 0 0 10px #101821, 0 10px 30px #0008;
+    }
+    .supply-knob::after { content: ""; position: absolute; inset: 15px; border-radius: 50%; background: #0e151d; }
+    .knob-label { position: relative; z-index: 1; text-align: center; font-size: 1.2rem; font-weight: 600; }
+    .knob-label small { display: block; color: var(--muted); font-size: .75rem; font-weight: 400; }
+    .button-row { display: flex; flex-wrap: wrap; gap: 8px; }
+    button { border: 1px solid var(--line); border-radius: 8px; color: var(--text); background: var(--panel-2); padding: 9px 12px; }
+    button.primary { background: #195b67; border-color: #2b9cad; }
+    button.danger { color: #ffd0d0; border-color: #8d4444; background: #411e24; }
+    button:disabled { opacity: .45; cursor: not-allowed; }
+    .switch { display: flex; gap: 8px; align-items: center; color: var(--muted); }
+    .switch input { accent-color: var(--green); }
+    .workspace { min-width: 0; }
+    .topbar { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; margin-bottom: 14px; }
+    .state { display: inline-flex; gap: 8px; align-items: center; border: 1px solid var(--line); border-radius: 999px; padding: 6px 10px; white-space: nowrap; }
+    .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--green); box-shadow: 0 0 12px currentColor; }
+    .dot.fault { background: var(--red); color: var(--red); }
+    .dot.idle { background: var(--muted); color: var(--muted); }
+    .visual-grid { display: grid; grid-template-columns: minmax(270px, 1fr) minmax(300px, 1.2fr); gap: 14px; }
+    .scene, .oled, .trace { background: #0b1219; border: 1px solid var(--line); border-radius: 10px; }
+    .scene { min-height: 480px; padding: 8px; }
+    .scene svg { display: block; width: 100%; height: 460px; }
+    .scene text { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; fill: var(--muted); font-size: 12px; }
+    .scene .bright { fill: var(--text); }
+    .scene .bath { fill: #194f61; fill-opacity: .8; }
+    .scene .waterline { stroke: var(--cyan); stroke-width: 2; stroke-dasharray: 5 5; }
+    .scene .rail { stroke: #5c6d7b; stroke-width: 8; stroke-linecap: round; }
+    .scene .part { fill: url(#partGradient); stroke: #f0d8b1; stroke-width: 2; }
+    .scene .wire { stroke: var(--orange); stroke-width: 3; fill: none; }
+    .scene .cutoff { stroke: var(--red); stroke-width: 1.5; stroke-dasharray: 3 4; }
+    .right-stack { display: grid; gap: 14px; align-content: start; }
+    .oled { padding: 18px; min-height: 214px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; box-shadow: inset 0 0 36px #12302c; }
+    .oled-title { color: var(--green); letter-spacing: .08em; font-size: .78rem; margin-bottom: 12px; }
+    .oled .big { color: var(--green); font-size: 1.65rem; margin: 8px 0; }
+    .oled .warn { color: var(--yellow); }
+    .oled .fault { color: var(--red); }
+    .trace { padding: 10px; }
+    .trace svg { display: block; width: 100%; height: 170px; }
+    .trace text { fill: var(--muted); font-size: 11px; }
+    .trace .gridline { stroke: #263847; stroke-width: 1; }
+    .trace .voltage { stroke: var(--cyan); stroke-width: 2; fill: none; }
+    .trace .current { stroke: var(--orange); stroke-width: 2; fill: none; }
+    .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 14px; }
+    .metric { background: var(--panel-2); border-radius: 8px; padding: 10px; display: block; }
+    .metric-label { color: var(--muted); font-size: .76rem; display: block; }
+    .metric-value { font-size: 1.08rem; font-variant-numeric: tabular-nums; }
+    .log { max-height: 150px; overflow: auto; margin-top: 12px; color: var(--muted); font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .log div { border-bottom: 1px solid #1e2b36; padding: 3px 0; }
+    .footer-note { color: var(--muted); font-size: .82rem; margin: 14px 0 0; }
+    @media (max-width: 850px) {
+      main { padding: 16px; }
+      .layout, .visual-grid { grid-template-columns: 1fr; }
+      .left-controls { order: 2; }
+      .workspace { order: 1; }
+    }
+    @media (max-width: 520px) {
+      .topbar { display: block; }
+      .state { margin-top: 10px; }
+      .metrics { grid-template-columns: repeat(2, 1fr); }
+      .scene { min-height: 400px; }
+      .scene svg { height: 380px; }
+    }
+  </style>
+</head>
+<body>
+<main id="anodizer-simulator">
+  <h1>Titanium Anodization Controller Simulator</h1>
+  <p class="muted">Manual supply → controller logic → lift actuator</p>
+  <div class="warning" role="alert"><strong>Simulation only.</strong> This models the untested conceptual design. It does not connect to, measure, or control real hardware.</div>
+
+  <div class="layout">
+    <aside class="left-controls">
+      <section class="panel" aria-labelledby="supply-heading">
+        <h2 id="supply-heading">Bench supply</h2>
+        <div class="supply-knob" id="voltage-knob" style="--pct: 0">
+          <div class="knob-label"><span id="voltage-knob-value">0</span><small>V setpoint</small></div>
+        </div>
+        <label class="control" for="voltage-input">
+          <span class="control-head"><span>Voltage knob</span><span class="value"><span id="voltage-value">0</span> V</span></span>
+          <input id="voltage-input" type="range" min="0" max="120" step="0.5" value="0">
+        </label>
+        <label class="control" for="current-input">
+          <span class="control-head"><span>Current limit knob</span><span class="value"><span id="current-value">0.50</span> A</span></span>
+          <input id="current-input" type="range" min="0" max="3" step="0.05" value="0.5">
+        </label>
+        <label class="switch"><input id="supply-output" type="checkbox"> Supply output available</label>
+      </section>
+
+      <section class="panel" aria-labelledby="hardware-heading">
+        <h2 id="hardware-heading">Controller hardware</h2>
+        <div class="hardware-id">Raspberry Pi Pico WH</div>
+        <p class="muted">Pico 1 / RP2040 · headers + Wi-Fi/BLE</p>
+        <div class="pin-grid" aria-label="Conceptual Pico WH pin map">
+          <span>GP0/1</span><span>isolated I²C / ADC</span>
+          <span>GP2/3/4</span><span>step / direction / enable</span>
+          <span>GP10</span><span>isolated output enable</span>
+          <span>GP11</span><span>interlock feedback</span>
+          <span>GP12/13</span><span>top / bottom endstops</span>
+          <span>GP16/17</span><span>OLED I²C</span>
+          <span>GP18–22</span><span>encoder, buttons, fault IRQ</span>
+        </div>
+        <p class="footer-note">Wireless is not used in this conceptual safety path.</p>
+      </section>
+
+      <section class="panel" aria-labelledby="recipe-heading">
+        <h2 id="recipe-heading">Controller recipe</h2>
+        <label class="control" for="mode-input"><span class="control-head"><span>Mode</span></span>
+          <select id="mode-input"><option value="COACHED">Coached gradient</option><option value="UNIFORM">Uniform color</option></select>
+        </label>
+        <label class="control" for="length-input"><span class="control-head"><span>Part length</span><span class="value"><span id="length-value">47</span> mm</span></span>
+          <input id="length-input" type="range" min="10" max="99" step="1" value="47">
+        </label>
+        <label class="control" for="start-input"><span class="control-head"><span>Start color</span></span>
+          <select id="start-input"></select>
+        </label>
+        <label class="control" for="end-input"><span class="control-head"><span>End color</span></span>
+          <select id="end-input"></select>
+        </label>
+        <label class="control" for="spread-input"><span class="control-head"><span>Spread</span></span>
+          <select id="spread-input"><option value="EQUAL_BANDS">Equal bands</option><option value="LINEAR">Linear endpoints</option></select>
+        </label>
+        <div class="button-row">
+          <button class="primary" id="start-button" type="button">Start run</button>
+          <button id="reset-button" type="button">Reset</button>
+          <button class="danger" id="fault-button" type="button">Inject fault</button>
+        </div>
+        <p class="footer-note">Simulated front-panel controls:</p>
+        <div class="button-row" aria-label="Simulated front-panel controls">
+          <button class="primary" id="select-button" type="button">SELECT (hold 1 s)</button>
+          <button id="back-button" type="button">BACK</button>
+        </div>
+      </section>
+
+      <section class="panel" aria-labelledby="interlock-heading">
+        <h2 id="interlock-heading">Interlocks</h2>
+        <label class="switch"><input id="lid-input" type="checkbox" checked> Lid closed</label>
+        <label class="switch"><input id="estop-input" type="checkbox" checked> E-stop released</label>
+        <p class="footer-note">The simulated output path requires both interlocks. Faults latch until reset.</p>
+      </section>
+    </aside>
+
+    <section class="workspace" aria-label="Simulator workspace">
+      <div class="topbar">
+        <div><h2>Controller workspace</h2><p class="muted">Pico WH target · corrected fully-submerged coordinate origin and cutoff margin.</p></div>
+        <div class="state"><span class="dot idle" id="state-dot"></span><span id="state-label" aria-live="polite">IDLE</span></div>
+      </div>
+
+      <div class="visual-grid">
+        <div class="scene" aria-label="Animated actuator, titanium part, and bath simulation">
+          <svg viewBox="0 0 430 460" role="img" aria-labelledby="scene-title scene-desc">
+            <title id="scene-title">Actuator position in the anodizing bath</title>
+            <desc id="scene-desc">A carriage moves a titanium part up and down relative to the bath waterline.</desc>
+            <defs>
+              <linearGradient id="partGradient" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#f5a65b"/><stop offset="45%" stop-color="#bb9cff"/><stop offset="100%" stop-color="#56d6e9"/>
+              </linearGradient>
+            </defs>
+            <rect class="bath" x="35" y="285" width="360" height="145" rx="8"></rect>
+            <line class="waterline" x1="35" x2="395" y1="285" y2="285"></line>
+            <text x="42" y="278">bath surface / touchdown datum</text>
+            <line class="rail" x1="215" x2="215" y1="26" y2="416"></line>
+            <g id="cutoff-mark"><line class="cutoff" x1="102" x2="328" y1="0" y2="0"></line><text x="334" y="4">cutoff</text></g>
+            <g id="actuator-group">
+              <rect id="carriage" x="156" y="90" width="118" height="25" rx="6" fill="#738697"></rect>
+              <line class="wire" x1="215" x2="215" y1="114" y2="155"></line>
+              <rect id="titanium-part" class="part" x="197" y="155" width="36" height="210" rx="5"></rect>
+            </g>
+            <text id="position-label" class="bright" x="42" y="44">carriage: — mm</text>
+            <text id="travel-label" x="42" y="62">travel: — / — mm</text>
+            <text x="42" y="446">blue fill = electrolyte</text>
+          </svg>
+        </div>
+
+        <div class="right-stack">
+          <section class="oled" aria-label="Controller display">
+            <div class="oled-title">ANODIZER CTRL // CONCEPT MODEL</div>
+            <div id="oled-state" class="big">READY</div>
+            <div id="oled-line-1">Output: OFF</div>
+            <div id="oled-line-2">Set supply to 0 V</div>
+            <div id="oled-line-3">Length: 47 mm</div>
+            <div id="oled-line-4">Recipe: MAGENTA → GREEN</div>
+            <div id="oled-line-5" class="muted">Hold SELECT to begin</div>
+          </section>
+          <section class="trace" aria-label="Voltage and current trace">
+            <svg id="trace-svg" viewBox="0 0 600 170" role="img" aria-labelledby="trace-title trace-desc">
+              <title id="trace-title">Simulated cell voltage and current trace</title>
+              <desc id="trace-desc">Cyan is measured cell voltage. Orange is measured current scaled to the chart.</desc>
+              <line class="gridline" x1="45" x2="580" y1="25" y2="25"></line><line class="gridline" x1="45" x2="580" y1="85" y2="85"></line><line class="gridline" x1="45" x2="580" y1="145" y2="145"></line>
+              <text x="8" y="29">120V</text><text x="20" y="89">60V</text><text x="30" y="149">0V</text>
+              <text x="45" y="164">time</text><path id="voltage-path" class="voltage" d=""></path><path id="current-path" class="current" d=""></path>
+            </svg>
+          </section>
+        </div>
+      </div>
+
+      <div class="metrics" aria-label="Live simulation values">
+        <div class="metric"><span class="metric-label">Measured cell voltage</span><span class="metric-value" id="metric-voltage">0.0 V</span></div>
+        <div class="metric"><span class="metric-label">Measured current</span><span class="metric-value" id="metric-current">0.000 A</span></div>
+        <div class="metric"><span class="metric-label">Peak voltage</span><span class="metric-value" id="metric-peak">0.0 V</span></div>
+        <div class="metric"><span class="metric-label">Actuator position</span><span class="metric-value" id="metric-position">— mm</span></div>
+      </div>
+      <div class="log" id="event-log" aria-live="polite"></div>
+    </section>
+  </div>
+</main>
+
+<script>
+(() => {
+  "use strict";
+  const palette = [
+    ["BRONZE", 15, 18], ["VIOLET", 20, 25], ["BLUE", 30, 40],
+    ["TEAL", 45, 50], ["GOLD", 52, 58], ["ROSE", 62, 68],
+    ["MAGENTA", 75, 82], ["CYAN", 86, 92], ["GREEN", 96, 104]
+  ];
+  const root = document.getElementById("anodizer-simulator");
+  const $ = (id) => document.getElementById(id);
+  const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+  const mid = (color) => (color[1] + color[2]) / 2;
+
+  const els = {
+    voltage: $("voltage-input"), currentLimit: $("current-input"), supply: $("supply-output"),
+    mode: $("mode-input"), length: $("length-input"), start: $("start-input"), end: $("end-input"),
+    spread: $("spread-input"), lid: $("lid-input"), estop: $("estop-input"), startRun: $("start-button"),
+    reset: $("reset-button"), select: $("select-button"), back: $("back-button"), inject: $("fault-button"), state: $("state-label"), stateDot: $("state-dot"),
+    voltageValue: $("voltage-value"), currentValue: $("current-value"), lengthValue: $("length-value"),
+    knob: $("voltage-knob"), knobValue: $("voltage-knob-value"), oledState: $("oled-state"),
+    oled1: $("oled-line-1"), oled2: $("oled-line-2"), oled3: $("oled-line-3"), oled4: $("oled-line-4"), oled5: $("oled-line-5"),
+    metricVoltage: $("metric-voltage"), metricCurrent: $("metric-current"), metricPeak: $("metric-peak"), metricPosition: $("metric-position"),
+    carriage: $("carriage"), part: $("titanium-part"), positionLabel: $("position-label"), travelLabel: $("travel-label"),
+    voltagePath: $("voltage-path"), currentPath: $("current-path"), log: $("event-log")
+  };
+
+  palette.forEach((color, index) => {
+    const option = document.createElement("option");
+    option.value = index; option.textContent = `${color[0]} (${color[1]}–${color[2]} V)`;
+    els.start.append(option.cloneNode(true)); els.end.append(option);
+  });
+  els.start.value = "6"; els.end.value = "8";
+
+  const sim = {
+    state: "IDLE", voltage: 0, currentLimit: 0.5, measuredVoltage: 0, measuredCurrent: 0,
+    peakVoltage: 0, position: 18, surfacePos: 62.4, fullySubmerged: 114.4, cutoff: 65.4,
+    travelSpan: 49, partLength: 47, frac: 0, formation: 0, desiredVoltage: 0, fault: "", lastTime: performance.now(),
+    trace: [], log: []
+  };
+
+  function addLog(message) {
+    sim.log.unshift(`${new Date().toLocaleTimeString()}  ${message}`);
+    sim.log = sim.log.slice(0, 16);
+    els.log.innerHTML = sim.log.map((line) => `<div>${line}</div>`).join("");
+  }
+
+  function table() {
+    const start = Number(els.start.value), end = Number(els.end.value);
+    const band = palette.slice(Math.min(start, end), Math.max(start, end) + 1);
+    const centers = band.map(mid);
+    if (centers.length < 1 || start > end) return null;
+    if (els.spread.value === "LINEAR") return centers.length >= 2 ? [[centers[0], 0], [centers.at(-1), 1]] : null;
+    if (centers.length === 1) return [[centers[0], 0], [centers[0], 1]];
+    const points = [[centers[0], 0]];
+    for (let i = 1; i < centers.length; i++) points.push([(centers[i - 1] + centers[i]) / 2, i / centers.length]);
+    points.push([centers.at(-1), 1]);
+    return points;
+  }
+
+  function interpInverse(points, voltage) {
+    if (!points) return 0;
+    if (voltage <= points[0][0]) return points[0][1];
+    for (let i = 1; i < points.length; i++) {
+      if (voltage <= points[i][0]) {
+        const [v0, f0] = points[i - 1], [v1, f1] = points[i];
+        return f0 + (voltage - v0) * (f1 - f0) / Math.max(0.001, v1 - v0);
+      }
+    }
+    return points.at(-1)[1];
+  }
+
+  function interp(points, frac) {
+    if (!points) return 0;
+    const f = clamp(frac, 0, 1);
+    for (let i = 1; i < points.length; i++) {
+      if (f <= points[i][1]) {
+        const [v0, f0] = points[i - 1], [v1, f1] = points[i];
+        return v0 + (f - f0) * (v1 - v0) / Math.max(0.001, f1 - f0);
+      }
+    }
+    return points.at(-1)[0];
+  }
+
+  function recipeName() {
+    const s = palette[Number(els.start.value)], e = palette[Number(els.end.value)];
+    return s && e ? `${s[0]} → ${e[0]}` : "invalid recipe";
+  }
+
+  function actualCell() {
+    if (!els.supply.checked || sim.state === "FAULT" || !els.lid.checked || !els.estop.checked) return [0, 0];
+    const immersion = clamp((sim.position - sim.surfacePos) / Math.max(1, sim.partLength), 0, 1);
+    const effectiveResistance = 180 + immersion * 180;
+    const touchdownSignal = sim.state === "TOUCHDOWN" && sim.position >= sim.surfacePos ? Math.min(0.08, sim.voltage / 900) : 0;
+    const formationFactor = sim.state === "SETTLE" || sim.state === "SWEEP" ? Math.max(0.01, 1 - 0.99 * sim.formation) : 1;
+    const current = Math.min(sim.currentLimit, Math.max(touchdownSignal, sim.voltage / effectiveResistance * (0.2 + immersion * 0.8) * formationFactor));
+    const measuredVoltage = sim.state === "SETTLE" || sim.state === "SWEEP"
+      ? Math.min(sim.voltage, sim.currentLimit * effectiveResistance)
+      : Math.min(sim.voltage, current * effectiveResistance);
+    return [measuredVoltage, current];
+  }
+
+  function fault(reason) {
+    sim.fault = reason; sim.state = "FAULT"; sim.measuredVoltage = 0; sim.measuredCurrent = 0;
+    els.supply.checked = false; addLog(`FAULT LATCHED: ${reason}`);
+  }
+
+  function startRun() {
+    if (sim.state !== "IDLE" && sim.state !== "DONE") return;
+    const points = table();
+    if (!points || !els.lid.checked || !els.estop.checked) { addLog("Start blocked: recipe or interlock invalid"); return; }
+    sim.partLength = Number(els.length.value);
+    sim.surfacePos = 62.4; sim.fullySubmerged = sim.surfacePos + sim.partLength + 5;
+    sim.cutoff = sim.surfacePos + 3; sim.travelSpan = sim.fullySubmerged - sim.cutoff;
+    sim.peakVoltage = 0; sim.position = 18; sim.frac = 0; sim.formation = 0; sim.fault = ""; sim.state = "HOMING";
+    addLog(`Run started: ${recipeName()}, ${sim.partLength} mm`);
+  }
+
+  function reset() {
+    sim.state = "IDLE"; sim.fault = ""; sim.voltage = 0; sim.peakVoltage = 0; sim.measuredVoltage = 0; sim.measuredCurrent = 0;
+    sim.position = 18; sim.frac = 0; sim.formation = 0; sim.trace = []; els.voltage.value = "0"; els.supply.checked = false; addLog("Controller reset");
+  }
+
+  function back() {
+    if (["HOMING", "TOUCHDOWN", "SETTLE", "SWEEP"].includes(sim.state)) {
+      sim.state = "CLEAR"; els.supply.checked = false; addLog("BACK pressed; output disabled and retracting");
+    } else {
+      addLog("BACK pressed; no active run");
+    }
+  }
+
+  function step(dt) {
+    sim.voltage = Number(els.voltage.value); sim.currentLimit = Number(els.currentLimit.value);
+    const [v, i] = actualCell(); sim.measuredVoltage = v; sim.measuredCurrent = i;
+    const points = table();
+    if (sim.state === "HOMING") { sim.position = 18; sim.state = "TOUCHDOWN"; addLog("Homing complete; searching for bath surface"); }
+    if (sim.state === "TOUCHDOWN") {
+      if (!els.lid.checked || !els.estop.checked) return fault("interlock opened during touchdown");
+      sim.position = Math.min(sim.fullySubmerged, sim.position + dt * 18);
+      if (v > 105) return fault("hardware voltage ceiling");
+      if (i > 0.012 && sim.position >= sim.surfacePos) { sim.surfacePos = sim.position; sim.fullySubmerged = sim.surfacePos + sim.partLength + 5; sim.cutoff = sim.surfacePos + 3; sim.travelSpan = sim.fullySubmerged - sim.cutoff; sim.state = "SETTLE"; sim.formation = 0; addLog("Touchdown found; fully submerging"); }
+      if (sim.position >= sim.fullySubmerged) sim.state = "SETTLE";
+    } else if (sim.state === "SETTLE") {
+      sim.position = sim.fullySubmerged; sim.formation = clamp(sim.formation + dt / 4, 0, 1); sim.desiredVoltage = points ? points[0][0] : 0;
+      if (!els.supply.checked || Math.abs(v - sim.desiredVoltage) > 2) { sim.state = "SETTLE"; }
+      else if (i < 0.003 && v > 1) { sim.state = "SWEEP"; addLog("Formation settled; sweep armed"); }
+    } else if (sim.state === "SWEEP") {
+      if (!els.lid.checked || !els.estop.checked) return fault("interlock opened during sweep");
+      sim.peakVoltage = Math.max(sim.peakVoltage, v);
+      sim.frac = clamp(interpInverse(points, sim.peakVoltage), 0, 1);
+      const target = sim.fullySubmerged - sim.frac * sim.travelSpan;
+      sim.desiredVoltage = interp(points, sim.frac);
+      const coachedHold = els.mode.value === "COACHED" && v > sim.desiredVoltage + 2;
+      if (!coachedHold) sim.position += clamp(target - sim.position, -dt * 22, dt * 22);
+      if (v > 105) return fault("hardware voltage ceiling");
+      if (i > sim.currentLimit * 1.05) return fault("overcurrent");
+      if (sim.position <= sim.cutoff) { sim.state = "CLEAR"; els.supply.checked = false; addLog("Cutoff reached; output disabled before separation"); }
+    } else if (sim.state === "CLEAR") {
+      sim.position = Math.max(sim.position - dt * 15, 18); if (sim.position <= 18) { sim.state = "DONE"; addLog("Run complete"); }
+    }
+    sim.trace.push([v, i]); if (sim.trace.length > 120) sim.trace.shift();
+  }
+
+  function renderScene() {
+    const y = clamp(45 + (sim.position - 18) * 2.4, 28, 260);
+    els.carriage.setAttribute("y", y); els.part.setAttribute("y", y + 25);
+    els.positionLabel.textContent = `carriage: ${sim.position.toFixed(1)} mm`;
+    els.travelLabel.textContent = `travel: ${Math.max(0, sim.fullySubmerged - sim.position).toFixed(1)} / ${sim.travelSpan.toFixed(1)} mm`;
+    const cutoff = clamp(45 + (sim.cutoff - 18) * 2.4, 28, 260); document.querySelector("#cutoff-mark line").setAttribute("y1", cutoff); document.querySelector("#cutoff-mark line").setAttribute("y2", cutoff); document.querySelector("#cutoff-mark text").setAttribute("y", cutoff + 4);
+    els.metricPosition.textContent = `${sim.position.toFixed(1)} mm`;
+  }
+
+  function renderTrace() {
+    const width = 535, height = 120, x0 = 45, y0 = 25;
+    const vPath = sim.trace.map((p, i) => `${i ? "L" : "M"}${x0 + i / 119 * width},${y0 + height - p[0] / 120 * height}`).join(" ");
+    const iPath = sim.trace.map((p, i) => `${i ? "L" : "M"}${x0 + i / 119 * width},${y0 + height - p[1] / 3 * height}`).join(" ");
+    els.voltagePath.setAttribute("d", vPath); els.currentPath.setAttribute("d", iPath);
+  }
+
+  function render() {
+    const s = sim.state, faulted = s === "FAULT";
+    els.state.textContent = s; els.stateDot.className = `dot ${faulted ? "fault" : s === "IDLE" || s === "DONE" ? "idle" : ""}`;
+    els.voltageValue.textContent = sim.voltage.toFixed(1); els.currentValue.textContent = sim.currentLimit.toFixed(2); els.lengthValue.textContent = sim.partLength;
+    els.knobValue.textContent = sim.voltage.toFixed(0); els.knob.style.setProperty("--pct", sim.voltage / 120);
+    els.metricVoltage.textContent = `${sim.measuredVoltage.toFixed(1)} V`; els.metricCurrent.textContent = `${sim.measuredCurrent.toFixed(3)} A`; els.metricPeak.textContent = `${sim.peakVoltage.toFixed(1)} V`;
+    els.oledState.textContent = faulted ? "FAULT LATCHED" : s === "IDLE" ? "READY" : s;
+    els.oledState.className = faulted ? "big fault" : "big";
+    els.oled1.textContent = `Output: ${els.supply.checked && !faulted ? "ENABLED" : "OFF"}`;
+    els.oled2.textContent = faulted ? sim.fault : s === "SWEEP" ? `Dial: ${sim.desiredVoltage.toFixed(1)} V` : s === "SETTLE" ? `Settle: ${sim.desiredVoltage.toFixed(1)} V` : "Set supply to 0 V";
+    els.oled3.textContent = `Length: ${sim.partLength} mm`; els.oled4.textContent = `Recipe: ${recipeName()}`;
+    els.oled5.textContent = faulted ? "Reset required" : s === "SWEEP" ? `${els.mode.value === "COACHED" ? "Coached" : "Following"} / peak-tracked` : "Hold SELECT to begin";
+    renderScene(); renderTrace();
+  }
+
+  els.voltage.addEventListener("input", render); els.currentLimit.addEventListener("input", render); els.length.addEventListener("input", render);
+  [els.mode, els.start, els.end, els.spread, els.supply, els.lid, els.estop].forEach((el) => el.addEventListener("change", render));
+  els.startRun.addEventListener("click", startRun); els.select.addEventListener("click", startRun); els.back.addEventListener("click", back); els.reset.addEventListener("click", reset); els.inject.addEventListener("click", () => fault("manual test fault"));
+
+  function loop(now) {
+    const dt = Math.min(0.08, Math.max(0.001, (now - sim.lastTime) / 1000)); sim.lastTime = now; step(dt); render(); requestAnimationFrame(loop);
+  }
+  addLog("Simulation ready"); render(); requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
