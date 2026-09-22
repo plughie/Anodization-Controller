@@ -2,6 +2,8 @@
 
 **Configuration:** you own a 0–120 V / 3 A supply and will adjust its voltage **by hand**. The Pico 1 H therefore never commands voltage. It reads the actual cell voltage, and drives the lift axis to the position that voltage should correspond to.
 
+**Status:** untested conceptual design. The circuit, protection system, firmware, motion geometry, and process limits are not validated for construction or energized operation.
+
 You turn the knob. The machine decides where the waterline belongs.
 
 That inverts the usual design and deletes most of the expensive parts: no DAC into the supply, no linear pass element, no 100 W heatsink, no poking around inside a working instrument.
@@ -14,22 +16,22 @@ That inverts the usual design and deletes most of the expensive parts: no DAC in
  [ YOUR 0–120 V / 3 A SUPPLY, manual knob ]
               │ +
               │
-        Q1 ───┴──────────┬─────────────────────────► ANODE (Ti workpiece)
-   (kill switch,         │
-    low-side, see §4)  K1 contacts in series
-              ┌──────────┘
+        K1 / ballast ─────────────────────────────► ANODE (Ti workpiece)
               │                              [ ANODIZING CELL ]
-       R_shunt 0.1 Ω 3 W                            │
               │                                CATHODE (Ti / 316 SS plate)
-        HV_RETURN ◄───────────────────────────────── │
+       R_shunt 0.1 Ω 3 W
+              │
+        Q1 low-side MOSFET
+              │
+        HV_RETURN ◄─────────────────────────────────┘
               │
    ═══════════╪════════════ ISOLATION BARRIER ════════════════
               │
    ┌──────────▼───────────────────┐
    │ SENSE BOARD (on HV_RETURN)   │        ISO1541
    │  1:40.8 divider → ADS1115    │◄════ isolated I²C ════╗
-   │  shunt → INA181 → ADS1115    │                       ║
-   │  arc/fault comparators + SR  │      ISO7710          ║
+   │  shunt metrology + arc front end│                    ║
+   │  arc/fault comparators + SR  │      ISO7710F         ║
    │  latch → Q1 gate driver      │◄══ enable (1 ch) ═════╣
    │  PCF8574: latch status,      │                       ║
    │    latch reset, K1 coil      │                       ║
@@ -41,8 +43,8 @@ That inverts the usual design and deletes most of the expensive parts: no DAC in
    │   GP0/1    I²C0 → ISO1541 → ADS1115
    │   GP2/3/4  STEP / DIR / EN → TMC2209
    │   GP8/9    UART1 → TMC2209 (StallGuard, current set)
-   │   GP10     OUTPUT ENABLE → ISO7710 → Q1 gate driver (fail-safe low)
-   │   GP11     E-stop / interlock loop sense
+   │   GP10     OUTPUT ENABLE → ISO7710F → Q1 gate driver (fail-safe low)
+   │   GP11     isolated E-stop / interlock feedback
    │   GP12/13  endstop TOP / BOTTOM
    │   GP15     piezo buzzer (out-of-tolerance / fault alert)
    │   GP16/17  I²C1 → SSD1306 128×64 OLED
@@ -105,7 +107,7 @@ Q1 source ──┬── R_shunt 0.1 Ω 3 W ──┬── HV_RETURN
       ADS1115 AIN2            ADS1115 AIN3   (differential, gain 8)
 ```
 
-3 A → 300 mV; gain 8 (±0.512 V FSR) → 15.6 µV/LSB → **0.16 mA resolution**. This channel earns its place by detecting things the voltage reading cannot:
+3 A → 300 mV; gain 8 (±0.512 V FSR) → 15.6 µV/LSB → **0.16 mA ideal ADC resolution**. The metrology path is direct to the ADS1115. Any separate amplifier used by the fast protection path must have gain and output headroom calculated for the full validated current; the earlier INA181A2 50× selection is not compatible with 3 A and a 3.3 V/5 V signal domain. This channel earns its place by detecting things the voltage reading cannot:
 
 - **contact loss** — current collapses while voltage stays up;
 - **the part clearing the bath** — current falls toward zero, which is the cue to drop the output *before* the final wet contact point can arc;
@@ -119,9 +121,9 @@ Low-side placement keeps both sense nodes near cell ground, so no high-side curr
 |---|---|---|
 | I²C across the barrier | **ISO1541** | Bidirectional isolated I²C, built for this ([TI datasheet](https://www.ti.com/lit/ds/symlink/iso1541.pdf)) |
 | Sense-side power | **TRACO TMR 0522**, 5 V → ±12 V, 2 W, 1.6 kV | Also supplies Q1's gate drive ([Traco TMR 2 datasheet](https://www.tracopower.com/tmr2-datasheet)) |
-| 3V3 on sense side | MCP1700-3302 LDO | From the +12 V rail |
+| 3V3 on sense side | 3V3 regulator rated for the complete +12 V rail and load | Do not use MCP1700 directly from +12 V |
 
-Mill or slot a ≥6 mm gap under the barrier and pour no copper across it.
+Mill or slot a ≥6 mm gap under the barrier and pour no copper across it. Treat 6 mm as a layout starting point, not a universal safety approval; verify clearance, creepage, pollution degree, insulation system, and test voltage against the applicable requirements.
 
 Why bother: you will have a laptop on the Pico's USB port while tuning firmware. Without the barrier, USB ground is bonded to the anodizing return, and one wiring slip puts 120 V on your laptop chassis. **Budget alternative** (saves ~$23): float the whole Pico on HV_RETURN, power it from its own wall adapter, and never connect USB while the supply is live — flash firmware with the supply unplugged. Workable, but one forgotten cable away from an expensive afternoon.
 
@@ -129,19 +131,19 @@ Why bother: you will have a laptop on the Pico's USB port while tuning firmware.
 
 ## 4. Output kill chain
 
-Because you are working the knob manually, the automated kill path matters more, not less — the arc-avoidance cut at the end of the lift is timing-critical and you will not beat it by hand.
+Because you are working the knob manually, the automated kill path matters more, not less — the arc-avoidance cut at the end of the lift is timing-critical and you will not beat it by hand. This section is a protection concept, not a validated safety circuit.
 
 | Layer | Implementation |
 |---|---|
-| **Q1, electronic interrupt** | IRFP460 in the low side (source at HV_RETURN, so gate drive is trivially referenced to the sense-board 12 V). Used purely as a switch, not linearly: Rds(on) 0.27 Ω, so 0.27 W at 1 A — **no heatsink needed**. Opens in microseconds with no arc ([Vishay IRFP460](https://www.vishay.com/docs/91237/91237.pdf)). |
-| **K1, galvanic interrupt** | Ordinary 12 V DPST relay in the anode lead, both contact sets wired in series. Firmware always turns Q1 off first, so K1 opens at zero current and never has to quench a 120 V DC arc. |
+| **Q1, electronic interrupt** | IRFP460 in the low side, with gate drive referenced to its source. The 0.27 Ω value is a room-temperature maximum at the datasheet test condition; conduction loss is 0.27 W at 1 A and 2.43 W at 3 A before temperature derating. A heatsink and transient/SOA analysis are required. |
+| **K1, galvanic interrupt** | DC-rated, appropriately safety-rated contactor or relay in the anode lead. Firmware turns Q1 off first during normal shutdown, but K1 must still interrupt the worst credible DC fault if Q1 fails short. |
 | **E-stop** | Latching NC mushroom button in series with K1's coil **and** driving a 2N7002 that pulls Q1's gate to HV_RETURN. Pure hardware, parallel to the Pico. |
 | **Lid interlock** | NC microswitch in the same coil loop. |
 | **Bleed** | 100 kΩ 2 W permanently across the output terminals. |
-| **Ballast** | 22 Ω 50 W in the anode lead. Caps fault current near 5 A and damps the cell. Costs ~11 V of headroom at 0.5 A — fold it into calibration. |
+| **Ballast** | Value and continuous/pulse rating TBD from validated current and fault-energy calculations. A 22 Ω, 50 W part is limited to about 1.5 A continuous even before thermal derating, and dissipates 198 W at 3 A. |
 | **Firmware trips** | over-current, current collapse, stepper stall (TMC2209 StallGuard), endstop violation, I²C watchdog timeout, `dV/dt` beyond axis capability. |
 
-Feed the supply from a GFCI outlet. Lid closed during runs, bath in a containment tray, nitrile gloves, one hand in your pocket.
+Feed the supply from a GFCI outlet, but do not treat the GFCI as protection against contact across a floating DC cell. Keep the lid closed during runs, put the bath in a containment tray, provide ventilation for generated gas and chemical mist, control ignition sources, and define chemical-specific PPE and spill procedures. Never access the bath while energized; use a verified discharge and lockout procedure.
 
 ### 4.1 Arc and open-circuit detection
 
@@ -175,14 +177,16 @@ The fix is a small analog detector on the sense board, referenced to HV_RETURN a
 | **OVERCURRENT** | Hard short, part touching the cathode | ~1.5× your working current |
 | **OPEN CIRCUIT** | Contact lost, part fell off, lead broken — current near zero while voltage stands up | I < 5 mA with V > 10 V, **blanked** until the MCU asserts "submerged and settled", since zero current is legitimate before immersion |
 | **COLLAPSE** | Voltage dragged down by a low-impedance fault | V < 50% of the last settled value |
+| **OVERVOLTAGE** | Supply or control fault above validated process limit | Independent hardware trip above `V_MAX_HARD` |
 
-**Crossing the barrier.** The comparators, the latch and Q1's gate driver all live on the sense board, referenced to HV_RETURN — the trip path never crosses the isolation barrier, which is precisely why it can be this fast and this independent. Only three things cross:
+**Crossing the barrier.** The comparators, the latch and Q1's gate driver all live on the sense board, referenced to HV_RETURN — the trip path never crosses the isolation barrier, which is precisely why it can be this fast and this independent. Only explicitly isolated control/status signals cross:
 
 | Signal | Route | Why |
 |---|---|---|
-| OUTPUT ENABLE | **ISO7710**, one dedicated digital isolator channel, fail-safe low | The MCU's command to allow output must not depend on a bus. Loss of signal or loss of power on either side means off |
+| OUTPUT ENABLE | **ISO7710F** or equivalent low-default isolator, one dedicated channel | The MCU's command to allow output must not depend on a bus. Loss of signal or loss of power on either side must mean off |
 | Latch status + latch reset | **PCF8574** I²C expander on the sense board, over the existing ISO1541 | Status only needs to arrive within tens of milliseconds — the hardware has already cut the output |
-| K1 coil drive | Same PCF8574 | Sequenced after Q1, so latency is irrelevant |
+| K1 coil drive | PCF8574 through a transistor/driver with a hardware de-energized-on-reset state | Sequenced after Q1, but must also fail off if the expander or isolated bus resets |
+| E-stop/interlock feedback | Dedicated isolated input | GP11 must never be wired directly to the sense-board or HV_RETURN domain |
 
 Do not route the enable over I²C. A hung bus would leave the output stuck on, which is the one failure mode the whole chain exists to prevent.
 
@@ -199,8 +203,8 @@ Detection is the backstop. The primary defence is not creating the arc:
 - **Cut the output before the last wet contact breaks.** This is the positional cutoff in §7 and it is the single most important line in the firmware. An arc at the moment of separation is the design's most likely arc by a wide margin.
 - **Ramp the voltage down before the final separation** rather than cutting at full voltage. Less stored energy, less to quench.
 - **Keep the electrical contact point above the active surface** and never let it exit the bath under power.
-- **The 22 Ω ballast caps arc current** to a few amps regardless of what else fails.
-- **Add a 2 A slow-blow fuse** in the anode lead as the last resort behind everything electronic.
+- **The calculated ballast and fuse must be coordinated** with the validated current limit and fault energy; the withdrawn 22 Ω / 50 W and 2 A fixed values must not be copied into hardware.
+- **Add independent hardware overvoltage protection** below the supply's maximum output and below the component/cell limits.
 - Above roughly 105 V you also risk **anodic breakdown** — sparking and pitting on the part surface while fully immersed, a different phenomenon from a meniscus arc but with the same current signature, so the ARC channel catches it too.
 
 ---
@@ -273,11 +277,11 @@ Published charts put gold/bronze near 10-18 V, purple at 18-25 V, blue at 30-40 
                                     SPREAD EQUAL BANDS
                                     PREVIEW / RUN
 
- PREVIEW                            47mm  78 -> 100 V   0.47 V/mm
-   +--------+  GREEN    100V  0.0mm
-   |  gradient  CYAN     89V  11.8mm
-   |  bar      MAGENTA   78V  23.5mm   band widths 11.8mm  OK
-   +--------+           settle 78V, 4 colors, est 2m10s
+ PREVIEW                            47mm  78.5 -> 100 V   estimate only
+   +--------+  GREEN    100V   0.0mm
+   |  gradient  CYAN     89V  15.7mm
+   |  bar      MAGENTA  78.5V 31.3mm   band widths 15.7mm  OK
+   +--------+           settle 78.5V, 3 colors, estimate only
 ```
 
 Encoder scrolls fields, SELECT enters a list and commits, BACK steps up. Store five named recipe slots in flash so a repeat display piece is one recall away.
@@ -324,7 +328,7 @@ That is the whole trick. Clamp the part *up* against the shoulder every time and
 
 **Datum 2 — the bath surface (measured electrically, every run).** Don't trust a fill line; you already have the shunt:
 
-1. Apply a low, safe voltage — 15 V, below the first color threshold.
+1. Apply a validated touchdown voltage below the first validated color threshold; 15 V is not automatically safe and overlaps the provisional bronze window.
 2. Descend slowly, 0.2 mm/s, watching the current channel.
 3. The instant current rises off zero, the bottom edge has touched the electrolyte. Record that carriage position as `surface_pos`.
 4. Continue down by `part_length + CLEARANCE` to fully submerge, then settle at V_start.
@@ -335,8 +339,8 @@ This self-calibrates bath level every run, so evaporation, refills and tank swap
 
 | Scale | Derivation |
 |---|---|
-| Travel span | `part_length - ARC_MARGIN`, submerged start to output cutoff |
-| Position of a band boundary | `surface_pos - frac x part_length` |
+| Travel span | `part_length + CLEARANCE - ARC_MARGIN`, fully submerged start to output cutoff |
+| Position of a band boundary | `fully_submerged_pos - frac x travel_span` |
 | Voltage gradient | `(V_end - V_start) / part_length` volts per millimetre |
 | Submersion depth | `part_length + CLEARANCE` below `surface_pos` |
 
@@ -344,14 +348,13 @@ This self-calibrates bath level every run, so evaporation, refills and tank swap
 
 ```
 LENGTH = 47 mm      -> SELECT-hold latches part_length = 47 mm
-recipe 78 -> 100 V  -> 4 colors -> 11.75 mm per band
+recipe 78.5 -> 100 V  -> 3 colors -> 15.67 mm per band
 touchdown found at carriage_pos = 62.4 mm
-submerge to 62.4 + 47 + 5 = 114.4 mm, settle at 78 V until current tapers
-  fraction 0.00  dial  78 V  carriage 62.4 mm   MAGENTA baseline
-  fraction 0.25  dial  85 V  carriage 50.6 mm
-  fraction 0.50  dial  90 V  carriage 38.9 mm   CYAN
-  fraction 0.75  dial  95 V  carriage 27.1 mm
-  fraction 1.00  dial 100 V  carriage 15.4 mm   GREEN
+submerge to 62.4 + 47 + 5 = 114.4 mm, settle at 78.5 V until current tapers
+  fraction 0.00  dial 78.5 V  carriage 114.4 mm  MAGENTA baseline
+  fraction 0.33  dial 83.75 V  carriage 98.1 mm   MAGENTA/CYAN boundary
+  fraction 0.67  dial 94.50 V  carriage 81.7 mm   CYAN/GREEN boundary
+  fraction 1.00  dial 100 V  carriage 65.4 mm   GREEN endpoint
 output off 3 mm before the last wet contact
 ```
 
@@ -362,71 +365,127 @@ Note that the length never changes the voltage endpoints — those come from the
 ## 7. Firmware sketch
 
 ```python
-state = IDLE   # IDLE → RECIPE → HOMING → TOUCHDOWN → SETTLE → SWEEP → CLEAR → DONE | FAULT
+state = "IDLE"   # IDLE -> RECIPE -> HOMING -> TOUCHDOWN -> SETTLE -> SWEEP -> CLEAR -> DONE | FAULT
 v_peak = 0.0
+
+def fail_safe_trip(reason):
+    global state
+    output_off()             # Q1 first; hardware latch remains authoritative
+    hold_axis()
+    set_k1(False)
+    record_fault(reason)
+    state = "FAULT"
 
 # --- build the position→voltage map from the recipe ---
 def build_table(start_idx, end_idx, spread):
     band = PALETTE[start_idx:end_idx + 1]
-    mid  = lambda c: (c[1] + c[2]) / 2          # centre of a color window
-    if spread == LINEAR:
-        return [(mid(band[0]), 0.0), (mid(band[-1]), 1.0)]
-    n = len(band)                               # EQUAL BANDS
-    return [(mid(c), k / (n - 1)) for k, c in enumerate(band)]
+    if not band:
+        raise ValueError("empty recipe")
+    centers = [(c[1] + c[2]) / 2 for c in band]
+    if spread == "LINEAR":
+        if len(centers) < 2 or centers[0] >= centers[-1]:
+            raise ValueError("LINEAR requires two increasing endpoints")
+        return [(centers[0], 0.0), (centers[-1], 1.0)]
+    if spread != "EQUAL_BANDS":
+        raise ValueError("unknown spread mode")
+    if len(centers) == 1:
+        return [(centers[0], 0.0), (centers[0], 1.0)]
+    # n colors produce n equal physical bands. Intermediate voltages are
+    # boundaries between adjacent validated color centers.
+    table = [(centers[0], 0.0)]
+    n = len(centers)
+    for k in range(1, n):
+        boundary = (centers[k - 1] + centers[k]) / 2
+        table.append((boundary, k / n))
+    table.append((centers[-1], 1.0))
+    return table
 
 # --- IDLE / RECIPE: encoder scrolls, SELECT commits, BACK steps up ---
-length_mm = flash.load("length", 47)            # encoder is relative: persist it
+length_mm = clamp(flash.load("length", 47), 10, 99)
 TABLE = build_table(start_idx, end_idx, spread)
-for name, lo, hi in band_edges(TABLE):
-    if (hi - lo) * length_mm < 1.5:
-        oled.warn(f"{name} band < 1.5mm")       # meniscus will smear it
+band_count = end_idx - start_idx + 1
+if spread == "EQUAL_BANDS" and length_mm / band_count < 1.5:
+    oled.warn("band width < 1.5mm")
 
 if select_held(1000):                           # deliberate start
-    part_length = length_mm                     # LATCH — geometry frozen
+    validate_interlocks_closed()
+    validate_recipe(TABLE, V_MAX_SOFT)
+    part_length = length_mm                     # LATCH: geometry frozen
     v_start, v_end = TABLE[0][0], TABLE[-1][0]
-    assert v_end <= V_MAX                       # 105 V ceiling, breakdown risk
     flash.save("length", length_mm)
-    state = HOMING
+    state = "HOMING"
 
-# --- TOUCHDOWN: find the bath surface with the shunt ---
-oled.coach(15)                                  # below the first color threshold
-while i < I_TOUCH:
-    descend(0.2)                                # mm/s
-surface_pos = pos_actual
-descend_to(surface_pos + part_length + CLEARANCE)
+# --- TOUCHDOWN: find the bath surface with a validated low voltage. ---
+if state == "HOMING":
+    home_axis_with_limits()
+    state = "TOUCHDOWN"
+    oled.coach(TOUCHDOWN_V)
+    enable_output_only_if_interlocks_are_closed()
+touchdown_deadline = monotonic() + TOUCHDOWN_TIMEOUT
+while state == "TOUCHDOWN":
+    v, i = ads_read()
+    if v > V_MAX_SOFT or latch_set() or bottom_endstop():
+        fail_safe_trip("touchdown guard")
+        break
+    if i >= I_TOUCH:
+        surface_pos = pos_actual
+        break
+    if monotonic() >= touchdown_deadline:
+        fail_safe_trip("touchdown timeout")
+        break
+    descend(0.2)                                # mm/s, bounded by endstops
 
 # --- SETTLE: pre-form the whole part at v_start, fully immersed ---
-oled.coach(v_start)
-wait_until(current_tapered() and abs(v - v_start) < tol)
-arm_open_circuit_channel()                      # un-blank now that we're wet
+if state == "TOUCHDOWN":
+    fully_submerged_pos = surface_pos + part_length + CLEARANCE
+    cutoff_pos = surface_pos + ARC_MARGIN
+    travel_span = fully_submerged_pos - cutoff_pos
+    descend_to(fully_submerged_pos, bounded=True)
+    state = "SETTLE"
+    oled.coach(v_start)
+    wait_until(current_tapered(), timeout=SETTLE_TIMEOUT)
+    if not voltage_in_window(v_start, tol):
+        fail_safe_trip("settle voltage")
+    else:
+        arm_open_circuit_channel()
+        state = "SWEEP"
 
-# --- 20 Hz loop during SWEEP ---
-v, i = ads_read()                               # volts at cell, amps
-v_peak = max(v_peak, v)                         # oxide remembers only the peak
+# --- Sweep loop, nominally 20 Hz; every iteration must complete safely. ---
+while state == "SWEEP":
+    v, i = ads_read()
+    v_peak = max(v_peak, v)                     # oxide remembers only the peak
+    if v > V_MAX_SOFT or latch_set():
+        fail_safe_trip("voltage or hardware latch")
+        break
+    if i > I_LIMIT or (i < I_MIN and v > OPEN_VOLTAGE):
+        fail_safe_trip("current fault")
+        break
 
-frac    = interp_inverse(TABLE, v_peak)         # volts → fraction of length
-pos_cmd = surface_pos - frac * part_length      # → carriage millimetres
-if abs(pos_cmd - pos_actual) > 0.1:             # deadband: no stepper chatter
-    move_towards(pos_cmd, max_rate=1.0)         # mm/s ceiling
+    frac = clamp(interp_inverse(TABLE, v_peak), 0.0, 1.0)
+    pos_cmd = fully_submerged_pos - frac * travel_span
+    if pos_actual <= cutoff_pos:
+        output_off()
+        state = "CLEAR"
+        break
+    if abs(pos_cmd - pos_actual) > 0.1:
+        move_towards(pos_cmd, max_rate=1.0)
 
-if MODE == COACHED:
-    travelled = surface_pos - pos_actual
-    wanted = interp(TABLE, (travelled + step_ahead) / part_length)
-    oled.coach(wanted, actual=v, band=band_name_at(wanted))
-    if abs(v - wanted) > tol:
-        hold_axis()
-        buzzer.chirp()                          # eyes on the bath, not the panel
-
-if latch_set():            fault(latch_channel())  # polled; HW already cut Q1
-if back_pressed():         abort()              # graceful: output off, retract
-if i > I_LIMIT:            fault("overcurrent")    # software backstop only
-if i < I_MIN and v > 10:   fault("contact lost")   # hardware channel is primary
-if dv_dt > SLEW_MAX:       fault("knob too fast")
-if surface_pos - pos_actual > part_length - arc_margin:
-    output_off()           # Q1 first, then K1 — before the last wet contact
+    if MODE == "COACHED":
+        wanted = interp(TABLE, frac)
+        oled.coach(wanted, actual=v, band=band_name_at(wanted))
+        if v > wanted + tol:
+            fail_safe_trip("voltage too high for position")
+            break
+        if abs(v - wanted) > tol:
+            hold_axis()
+            buzzer.chirp()
+    if back_pressed():
+        fail_safe_trip("operator abort")
+        break
+    sleep(0.05)
 ```
 
-Log `t, pos, v, v_peak, i` and the active recipe to CSV over USB every run. That log plus a photograph of the coupon is how the palette windows get refined, and the palette is what actually determines whether a display piece lands.
+Log `t, pos, v, v_peak, i`, interlock state, and the active recipe to CSV over USB every run. That log plus a photograph of the coupon is how the palette windows get refined, and the palette is what actually determines whether a display piece lands.
 
 ---
 
@@ -440,7 +499,8 @@ Log `t, pos, v, v_peak, i` and the active recipe to CSV over USB every run. That
 | 1 | ADS1115 16-bit ADC breakout | Cell voltage, shunt current | $15 ([Adafruit](https://www.adafruit.com/product/1085)) |
 | 1 | ISO1541DR | Isolated I²C barrier | ~$3 |
 | 1 | TRACO TMR 0522 (5 V → ±12 V, 2 W) | Isolated sense-side supply | ~$20 |
-| 1 | MCP1700-3302 LDO | 3V3 on sense side | ~$0.50 |
+| 1 | 24 V-to-5 V buck converter | Logic-board and TMR input rail | TBD |
+| 1 | 3V3 regulator rated for ≥15 V input | 3V3 on sense side from +12 V | TBD |
 | 3 | 330 kΩ 1% 1/4 W metal film | HV divider string | ~$0.30 |
 | 1 | 24.9 kΩ 0.1% | Divider bottom leg | ~$1 |
 | 1 | 0.1 Ω 3 W sense resistor | Shunt | ~$2 |
@@ -454,13 +514,13 @@ Log `t, pos, v, v_peak, i` and the active recipe to CSV over USB every run. That
 
 | Qty | Part | Purpose | Approx. each |
 |---:|---|---|---:|
-| 1 | INA181A2 current-sense amplifier | Shunt gain for both DC and AC paths | ~$1.50 |
+| 1 | Current-sense / arc front end with validated gain and headroom | Fast shunt protection path; exact part TBD | TBD |
 | 2 | LM393 / TLV3502 dual comparator | Four trip channels | ~$1.50 |
 | 1 | 74HC74 or CD4043 | SR latch, holds the trip | ~$0.60 |
 | 1 | 74HC32 or diode-OR network | Channel combining | ~$0.50 |
-| 1 | ISO7710 single-channel digital isolator | OUTPUT ENABLE across the barrier | ~$2.50 |
-| 1 | PCF8574 I²C expander | Latch status/reset and K1 coil on the sense side | ~$1 |
-| 1 | 2 A slow-blow fuse + holder | Last-resort anode lead protection | ~$4 |
+| 1 | ISO7710F single-channel digital isolator | Low-default OUTPUT ENABLE across the barrier | ~$2.50 |
+| 1 | PCF8574 I²C expander + fail-off coil driver | Latch status/reset and K1 coil on the sense side | TBD |
+| 1 | Coordinated DC fuse + holder | Last-resort anode lead protection | TBD |
 | — | 10 nF / 10 kΩ high-pass, trim pots for thresholds | Arc-channel tuning | ~$4 |
 | — | Passives, headers, perfboard or small PCB | | ~$15 |
 
@@ -468,13 +528,13 @@ Log `t, pos, v, v_peak, i` and the active recipe to CSV over USB every run. That
 
 | Qty | Part | Approx. each |
 |---:|---|---:|
-| 1 | IRFP460 (Q1, switch duty, no heatsink) | ~$4 |
+| 1 | IRFP460 (Q1, switch duty, thermal design required) | ~$4 |
 | 1 | 2N7002 + gate resistors (E-stop gate pulldown) | ~$0.50 |
-| 1 | 12 V DPST relay (K1) | ~$4 |
+| 1 | DC-rated safety contactor/relay (K1), voltage/current rating TBD | TBD |
 | 1 | ULN2003 or MOSFET + flyback diode for coil | ~$1 |
 | 1 | Latching NC mushroom E-stop | ~$12 |
 | 1 | NC lid interlock microswitch | ~$4 |
-| 1 | 22 Ω 50 W aluminium-clad ballast | ~$6 |
+| 1 | Ballast resistor, value/rating TBD by fault-energy calculation | TBD |
 | 1 | 100 kΩ 2 W bleed resistor | ~$1 |
 
 ### Motion
@@ -496,7 +556,7 @@ Log `t, pos, v, v_peak, i` and the active recipe to CSV over USB every run. That
 | 1 | Polypropylene tank + Ti or 316 SS cathode plate | ~$25 |
 | 1 | Insulated enclosure, glands, standoffs, labels | ~$35 |
 
-**Rough total: $290–330 including the frame and tank; about $110 for the electronics alone.** Indicative retail, will drift.
+**Cost estimate:** not currently reliable. The regulator, protection front end, DC-rated contactor, ballast, fuse, and isolation-test requirements remain TBD; recalculate the BOM after the schematic and hazard analysis are complete.
 
 Compared with the earlier programmable-supply plan, the hand-knob approach saves the supply cost and the entire HV generation and thermal subsystem — the pass element, its 1 °C/W heatsink and fan, the DAC and loop amplifiers.
 
@@ -505,10 +565,10 @@ Compared with the earlier programmable-supply plan, the hand-knob approach saves
 ## 9. Commissioning order
 
 1. **Sense chain dry.** No cell connected. Sweep the supply 0→120 V and build the two-point calibration; confirm agreement with a DMM within 0.5 V across the range.
-2. **Isolation check.** Confirm no continuity from HV_RETURN to Pico GND.
+2. **Isolation check.** Confirm the design's required creepage/clearance, insulation resistance, and withstand test using appropriately rated test equipment and qualified procedures; a continuity check alone is insufficient.
 3. **Kill chain, dry.** Test E-stop, lid switch and every firmware fault. Confirm Q1 opens and K1 drops, every time, before electrolyte is in the room.
 4. **Resistive load.** Substitute a 220 Ω 100 W resistor for the bath. Verify current readings and every trip channel: short the load for OVERCURRENT, open it for OPEN CIRCUIT, and confirm the latch holds until acknowledged.
-5. **Arc threshold calibration.** With the resistive load and a series test gap, draw a deliberate small arc at 60 V and set the ARC comparator threshold just below what it detects reliably. Then verify a normal 0→105 V ramp into the resistive load produces **zero** false trips. This step is the one that determines whether the protection is real or decorative — budget an afternoon.
+5. **Arc-detector calibration.** Use a controlled injected transient or an enclosed, interlocked test fixture under qualified supervision; do not draw an open-bench arc. Set the ARC comparator threshold below the validated detection level, then verify a normal 0→105 V ramp into the resistive load produces **zero** false trips.
 6. **Motion dry-run.** Full sweep with the tank empty, watching for swing, twist or binding, and confirming homing repeatability over ten cycles. Verify commanded length against a caliper at 10, 50 and 99 mm, confirm the length survives a power cycle, and confirm BACK aborts cleanly mid-sweep.
 7. **Flat coupons.** Fixed voltages in 5 V steps, photographed against a ruler, to seed and then correct the palette windows. Pay extra attention above 70 V — that is where your display-piece recipes live, and the windows are narrowest in volts there.
 8. **Enable the following loop.** Mode 2 first, on a coupon, before a part you care about.

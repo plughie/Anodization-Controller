@@ -1,5 +1,10 @@
 # Automated Titanium Anodizing for Color Effects
 
+> **Untested conceptual design.** The values and procedures below are research
+> notes, not validated operating instructions. Do not connect a supply or
+> electrolyte until the electrical design, guarding, ventilation, chemical
+> controls, and emergency shutdown have been reviewed and tested.
+
 ## Project goal
 
 Automate titanium anodizing across approximately 0–105 V DC while smoothly lifting the workpiece from the electrolyte to create a controlled color gradient or rainbow effect.
@@ -22,7 +27,7 @@ Approximate examples:
 | 50 cm² | 0.5–1.25 A |
 | 100 cm² | 1–2.5 A |
 
-The supply does not need to deliver its maximum current continuously. A 0–120 V, 3 A supply provides useful headroom, provided its current limit can be set low enough for the workpiece.
+The supply does not need to deliver its maximum current continuously. A 0–120 V, 3 A supply may provide useful headroom, provided its current limit can be set low enough for the workpiece and the external ballast, fuse, wiring, and protection system are rated for the validated operating and fault currents. The current values here are illustrative, not approved limits.
 
 Titanium color is primarily controlled by the anodizing voltage. The oxide thickness determines the optical interference color, while current mainly determines whether the process can proceed evenly and whether the supply overloads.
 
@@ -126,7 +131,7 @@ Low-cost supplies advertised as 0–120 V and 0–3 A may be adequate electrical
 
 ## Safety and implementation requirements
 
-105–120 V DC in a conductive electrolyte can cause severe shock, arcing, burns, and equipment damage. Use an isolated, current-limited supply and enclose or guard the bath and electrical connections.
+105–120 V DC in a conductive electrolyte can cause severe shock, arcing, burns, gas ignition, chemical exposure, and equipment damage. Use an isolated, current-limited supply and enclose or guard the bath and electrical connections. Provide ventilation for generated gas and chemical mist, control ignition sources, and never access the bath while energized.
 
 Recommended protections include:
 

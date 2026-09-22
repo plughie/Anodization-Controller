@@ -1,16 +1,16 @@
 ---
 title: Titanium Anodizer — Engineering Handoff
 project: Titanium Anodizing Lift Controller
-status: design complete, not yet built
+status: untested conceptual design; not built
 date: 2026-09-22
 tags: [project/anodizer, electronics, hardware, safety]
 ---
 
 # Titanium Anodizer — Engineering Handoff
 
-**Purpose of this document.** Onboarding for collaborators. It explains *why* the design is shaped the way it is, records the decisions that were considered and rejected, and gives operating instructions. The full circuit and BOM live in [[anodizer-controller-design]]; the original process notes are in [[titanium-anodizing-automation]].
+**Purpose of this document.** Onboarding for collaborators. It explains *why* the design is shaped the way it is, records the decisions that were considered and rejected, and gives operating instructions. The full circuit and BOM live in [anodizer-controller-design.md](anodizer-controller-design.md); the original process notes are in [titanium-anodizing-automation.md](titanium-anodizing-automation.md).
 
-**Status:** design complete on paper. Nothing has been built or validated on hardware. Every number below is calculated or sourced, not measured.
+**Status:** untested conceptual design. Nothing has been built or validated on hardware. Every number below is calculated or sourced, not measured; no value is an approved operating limit.
 
 ---
 
@@ -66,7 +66,7 @@ There are two ways to run this, and the default is the second:
 
 ### 2.5 Galvanic isolation is mandatory, not a nicety
 
-The measurement side sits on the anodizing return. A laptop plugged into the controller's USB port would otherwise bond earth to the cell return. The barrier is an **ISO1541 isolated I²C** link plus a **TRACO TMR 0522** (5 V to ±12 V, 1.6 kV) feeding an **MCP1700-3302** LDO, with a ≥6 mm milled slot under the barrier.
+The measurement side sits on the anodizing return. A laptop plugged into the controller's USB port would otherwise bond earth to the cell return. The barrier is an **ISO1541 isolated I²C** link plus a **TRACO TMR 0522** (5 V to ±12 V) feeding a 3V3 regulator rated for the complete +12 V rail and load, with a ≥6 mm milled slot under the barrier. The logic board also needs an explicit 24 V-to-5 V converter; the TMR input is not a substitute for that power stage.
 
 This is not optional and it is not a place to economize. Anyone modifying the sense board must preserve the keepout.
 
@@ -86,9 +86,9 @@ A **0.1 Ω 3 W low-side shunt** read differentially on the ADS1115 at gain 8 res
 
 ### 3.3 Kill chain — three independent layers
 
-- **Q1, an IRFP460** low-side MOSFET used purely as a switch. At 1 A it dissipates 0.27 W, so no heatsink. This is the fast interrupt.
-- **K1, an ordinary 12 V DPST relay** in the anode lead, which opens **only at zero current**. Sequencing matters: an ordinary relay cannot quench a DC arc, so it must never be the element that breaks current.
-- **A hardwired latching mushroom E-stop** in the K1 coil circuit, with a 2N7002 pulling Q1's gate low. Plus an NC lid interlock, a 100 kΩ 2 W bleed resistor, a 22 Ω 50 W ballast, and a GFCI-fed supply.
+- **Q1, an IRFP460** low-side MOSFET used purely as a switch. Its conduction loss and transient SOA must be thermally designed for the maximum fault and operating current; the earlier no-heatsink claim is withdrawn.
+- **K1, a DC-rated, appropriately safety-rated contactor or relay** in the anode lead. Q1 is switched first during normal shutdown, but K1 must still be able to interrupt the worst credible DC fault if Q1 fails short.
+- **A hardwired latching mushroom E-stop** in the K1 coil circuit, with a 2N7002 pulling Q1's gate low. Plus an NC lid interlock, a 100 kΩ 2 W bleed resistor, a calculated ballast, and a GFCI-fed supply.
 
 ### 3.4 Arc detection is hardware, because software is a thousand times too slow
 
@@ -105,7 +105,7 @@ A small analog detector on the sense board, powered from the isolated rail, prov
 
 All four feed an **SR latch** that pulls Q1's gate down directly, responding in a few microseconds. **The latch is deliberate:** arcs are intermittent, so a non-latching trip would chatter the output on and off and make the situation worse. It requires explicit acknowledgement to clear.
 
-The trip path never crosses the isolation barrier — that is what lets it be this fast and this independent. Only three signals cross: **OUTPUT ENABLE** on a dedicated ISO7710 channel (fail-safe low), plus latch status, latch reset and the K1 coil on a PCF8574 over the existing isolated I²C.
+The trip path never crosses the isolation barrier — that is what lets it be this fast and this independent. **OUTPUT ENABLE** must use the low-default **ISO7710F** ordering option or equivalent, with a hardware pulldown that disables Q1 on every power-loss state. Latch status, latch reset, and K1 control may cross through the isolated I²C, but K1 must have a de-energized-on-reset driver. The E-stop/interlock status returned to the Pico must use an explicitly isolated input; GP11 cannot be wired directly across the barrier.
 
 > **Do not move OUTPUT ENABLE onto the I²C bus.** A hung bus would leave the output stuck on, which is the exact failure the entire chain exists to prevent.
 
@@ -116,8 +116,8 @@ The detector is a backstop. The primary defences are procedural and cost nothing
 - **Cut the output before the last wet contact breaks.** This is the most important line in the firmware. Separation at the waterline is by far the most likely arc.
 - **Ramp voltage down before final separation** rather than cutting at full value.
 - Keep the electrical contact point above the active surface; never let it exit the bath energized.
-- The 22 Ω ballast caps arc current regardless of what else fails.
-- A 2 A slow-blow fuse in the anode lead sits behind everything electronic.
+- A ballast value and pulse/continuous power rating must be calculated from the validated current limit; 22 Ω at 3 A would dissipate 198 W and is not a 50 W component.
+- A fuse must be coordinated with the supply, validated operating current, ballast, wiring, and fault-clearing time; the earlier fixed 2 A value is withdrawn.
 - **Cap V_MAX at about 105 V.** Above that you risk anodic breakdown — sparking and pitting.
 
 ### 3.6 Motion
@@ -127,7 +127,7 @@ NEMA 17 with an integrated 150 mm T8 lead screw, driven by a **TMC2209** over UA
 ### 3.7 Two datums, one of them found fresh every run
 
 - **Mechanical:** a fixture shoulder puts the part top a fixed distance below the carriage face.
-- **Electrical:** the bath surface is located every run. Apply 15 V, descend at 0.2 mm/s, and the moment current rises off zero is touchdown. Record it as `surface_pos`.
+- **Electrical:** the bath surface is located every run. Apply a validated touchdown voltage below the first validated color threshold, descend at 0.2 mm/s, and record the carriage position when current rises off zero as `surface_pos`.
 
 Finding the surface electrically self-calibrates for bath level and doubles as a contact check before anything irreversible happens. It is the reason you never have to measure fluid height by hand.
 
@@ -168,7 +168,7 @@ Part length is entered in millimetres, 10–99 mm, persisted to flash and latche
 5. Watch the taper bar. When formation completes the display reads **"dial to 0 V to extract."**
 6. **Dial the supply to zero and the machine lifts the part out.**
 
-**Why the trigger is the knob and not a button.** Extraction happens at 0 V, so the waterline separation that causes the meniscus arc in gradient mode physically cannot arc — there is no potential across the gap when it breaks. It also keeps both hands on the supply knob instead of reaching for a button with a wet part hanging over electrolyte. And it costs nothing in color, since the film records the peak voltage and dialing down cannot unmake it.
+**Why the trigger is the knob and not a button.** Extraction happens at 0 V, which reduces the waterline-arc risk, but must not be treated as a guarantee that an arc cannot occur. The output-off state and discharge must be independently verified before extraction and before access to the bath.
 
 The trigger is gated on formation and debounced over 500 ms. A knob bump mid-formation will not yank a half-finished part out; if voltage hits zero before the film is formed the machine holds position and asks rather than guessing.
 
@@ -207,13 +207,13 @@ The palette is stored as voltage windows, and the position table as `(volts, fra
 Do not skip steps, and do not put electrolyte in the room before step 4.
 
 1. **Sense chain dry**, no cell. Sweep 0–120 V, build the two-point calibration, confirm agreement with a DMM within 0.5 V.
-2. **Isolation check.** Confirm no continuity from HV_RETURN to Pico ground.
+2. **Isolation check.** Confirm the design's required creepage/clearance, insulation resistance, and withstand test using appropriately rated test equipment and qualified procedures; a continuity check alone is insufficient.
 3. **Kill chain dry.** E-stop, lid switch, every firmware fault. Confirm Q1 opens and K1 drops every single time.
 4. **Resistive load.** Substitute a 220 Ω 100 W resistor for the bath. Short it for OVERCURRENT, open it for OPEN CIRCUIT, confirm the latch holds until acknowledged.
-5. **Arc threshold calibration.** Draw a deliberate small arc at 60 V through a test gap and set the ARC threshold just below reliable detection. Then confirm a normal 0→105 V ramp into the resistive load produces **zero** false trips. **This step decides whether the protection is real or decorative. Budget an afternoon.**
+5. **Arc-detector calibration.** Use a controlled injected transient or an enclosed, interlocked test fixture under qualified supervision; do not draw an open-bench arc. Set the ARC comparator threshold below the validated detection level, then confirm a normal 0→105 V ramp into the resistive load produces **zero** false trips.
 6. **Motion dry-run.** Empty tank. Watch for swing, twist and binding; confirm homing repeatability over ten cycles; verify commanded length against calipers at 10, 50 and 99 mm; confirm length survives a power cycle and BACK aborts cleanly.
 7. **Flat coupons** at fixed voltages in 5 V steps, photographed against a ruler, to seed and then correct the palette windows. Pay extra attention above 70 V, where the display-piece recipes live and the windows are narrowest in volts.
-8. **UNIFORM mode on a coupon**, end to end including zero-volt extraction. Simplest sequence and the only one that cannot arc, so it shakes out touchdown, formation detection and retraction before a moving waterline is added.
+8. **UNIFORM mode on a coupon**, end to end including zero-volt extraction. This reduces the gradient-specific risk, but must not be treated as arc-free; all interlocks and output-discharge checks still apply.
 9. **GRADIENT mode**, coached, on a coupon before a part anyone cares about.
 
 ---
@@ -243,9 +243,9 @@ Extended parts carry a per-type feeder fee, so consolidate passive values and pr
 
 ## 8. Budget
 
-Roughly **$290–330** all in, including frame and tank. About **$110** for electronics alone; arc detection adds about $12.
+The earlier **$290–330** estimate is no longer reliable because the regulator, protection front end, contactor, ballast, fuse, and isolation test requirements are still TBD. Treat all pricing as provisional until the schematic and hazard analysis are complete.
 
-Key line items: [ADS1115 breakout $14.95](https://www.adafruit.com/product/1085), [TMC2209 breakout $8.95](https://www.adafruit.com/product/6121), [Pico H $5.50](https://www.sparkfun.com/raspberry-pi-pico-h.html), [NEMA 17 with T8 screw ~$21](https://www.ebay.com/itm/186502889154). Full itemization in [[anodizer-controller-design]].
+Key line items remain indicative: [ADS1115 breakout](https://www.adafruit.com/product/1085), [TMC2209 breakout](https://www.adafruit.com/product/6121), [Pico H](https://www.sparkfun.com/raspberry-pi-pico-h.html), and [NEMA 17 with T8 screw](https://www.ebay.com/itm/186502889154). Full provisional itemization is in [anodizer-controller-design.md](anodizer-controller-design.md).
 
 ---
 
@@ -264,15 +264,15 @@ Key line items: [ADS1115 breakout $14.95](https://www.adafruit.com/product/1085)
 
 This machine runs **105 V DC into a conductive liquid**. That is a genuinely dangerous combination and DC is harder to let go of than AC.
 
-- GFCI-fed supply, lid closed during runs, bath in a containment tray.
-- Nitrile gloves. **One hand in your pocket** while the output is live.
-- Never reach into the tank without confirming the output is off and the bleed resistor has had time to work.
-- Treat the E-stop as the primary control, not a last resort.
+- GFCI-fed supply, lid closed during runs, bath in a containment tray, and ventilation for generated gas and chemical mist.
+- Use chemical-specific PPE and keep ignition sources controlled.
+- Never reach into the tank while energized. Confirm the output is off, verify discharge with an appropriate instrument, and apply lockout before service.
+- Treat the E-stop as an emergency control, not a substitute for normal stopping, guarding, de-energization, or lockout before service.
 - If a fault latches, **find out why before acknowledging it.** The latch exists to preserve evidence of a real fault, and clearing it reflexively throws away the only diagnostic you get.
 
 ---
 
 ## Related notes
 
-- [[anodizer-controller-design]] — full circuit, pin map, firmware sketch, BOM
-- [[titanium-anodizing-automation]] — original process research and problem statement
+- [anodizer-controller-design.md](anodizer-controller-design.md) — full circuit, pin map, firmware sketch, BOM
+- [titanium-anodizing-automation.md](titanium-anodizing-automation.md) — original process research and problem statement

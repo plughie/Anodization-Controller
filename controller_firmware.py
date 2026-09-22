@@ -1,8 +1,8 @@
-"""Conceptual controller sketch extracted from anodizer-controller-design.md.
+"""Untested conceptual controller sketch extracted from the design note.
 
-This file is not production firmware. It contains the palette example and the
-firmware pseudocode from the design note; hardware drivers, validation,
-fault-handling implementation, and safety review are still required.
+This is not production firmware. Hardware interfaces, validation, fault
+handling, safety review, and all process limits remain to be implemented and
+verified.
 """
 
 # Copyright © 2026 Duv McIntyre
@@ -18,72 +18,128 @@ PALETTE = [                      # name,      V_low, V_high
 ]
 
 
-state = IDLE   # IDLE -> RECIPE -> HOMING -> TOUCHDOWN -> SETTLE -> SWEEP -> CLEAR -> DONE | FAULT
+state = "IDLE"   # IDLE -> RECIPE -> HOMING -> TOUCHDOWN -> SETTLE -> SWEEP -> CLEAR -> DONE | FAULT
 v_peak = 0.0
 
-# --- build the position->voltage map from the recipe ---
+
+def fail_safe_trip(reason):
+    global state
+    output_off()             # Q1 first; hardware latch remains authoritative
+    hold_axis()
+    set_k1(False)
+    record_fault(reason)
+    state = "FAULT"
+
+
 def build_table(start_idx, end_idx, spread):
+    """Build a voltage/fraction table from validated palette centers."""
     band = PALETTE[start_idx:end_idx + 1]
-    mid  = lambda c: (c[1] + c[2]) / 2          # centre of a color window
-    if spread == LINEAR:
-        return [(mid(band[0]), 0.0), (mid(band[-1]), 1.0)]
-    n = len(band)                               # EQUAL BANDS
-    return [(mid(c), k / (n - 1)) for k, c in enumerate(band)]
+    if not band:
+        raise ValueError("empty recipe")
+    centers = [(c[1] + c[2]) / 2 for c in band]
+    if spread == "LINEAR":
+        if len(centers) < 2 or centers[0] >= centers[-1]:
+            raise ValueError("LINEAR requires two increasing endpoints")
+        return [(centers[0], 0.0), (centers[-1], 1.0)]
+    if spread != "EQUAL_BANDS":
+        raise ValueError("unknown spread mode")
+    if len(centers) == 1:
+        return [(centers[0], 0.0), (centers[0], 1.0)]
 
-# --- IDLE / RECIPE: encoder scrolls, SELECT commits, BACK steps up ---
-length_mm = flash.load("length", 47)            # encoder is relative: persist it
+    # n colors produce n equal physical bands. Intermediate voltages are
+    # boundaries between adjacent validated color centers.
+    table = [(centers[0], 0.0)]
+    n = len(centers)
+    for k in range(1, n):
+        boundary = (centers[k - 1] + centers[k]) / 2
+        table.append((boundary, k / n))
+    table.append((centers[-1], 1.0))
+    return table
+
+
+# --- IDLE / RECIPE: encoder scrolls, SELECT commits, BACK steps up. ---
+length_mm = clamp(flash.load("length", 47), 10, 99)
 TABLE = build_table(start_idx, end_idx, spread)
-for name, lo, hi in band_edges(TABLE):
-    if (hi - lo) * length_mm < 1.5:
-        oled.warn(f"{name} band < 1.5mm")       # meniscus will smear it
+band_count = end_idx - start_idx + 1
+if spread == "EQUAL_BANDS" and length_mm / band_count < 1.5:
+    oled.warn("band width < 1.5mm")
 
-if select_held(1000):                           # deliberate start
-    part_length = length_mm                     # LATCH - geometry frozen
+if select_held(1000):                         # deliberate start
+    validate_interlocks_closed()
+    validate_recipe(TABLE, V_MAX_SOFT)
+    part_length = length_mm                 # LATCH: geometry frozen
     v_start, v_end = TABLE[0][0], TABLE[-1][0]
-    assert v_end <= V_MAX                       # 105 V ceiling, breakdown risk
     flash.save("length", length_mm)
-    state = HOMING
+    state = "HOMING"
 
-# --- TOUCHDOWN: find the bath surface with the shunt ---
-oled.coach(15)                                  # below the first color threshold
-while i < I_TOUCH:
-    descend(0.2)                                # mm/s
-surface_pos = pos_actual
-descend_to(surface_pos + part_length + CLEARANCE)
+# --- TOUCHDOWN: find the bath surface with a validated low voltage. ---
+if state == "HOMING":
+    home_axis_with_limits()
+    state = "TOUCHDOWN"
+    oled.coach(TOUCHDOWN_V)
+    enable_output_only_if_interlocks_are_closed()
+touchdown_deadline = monotonic() + TOUCHDOWN_TIMEOUT
+while state == "TOUCHDOWN":
+    v, i = ads_read()
+    if v > V_MAX_SOFT or latch_set() or bottom_endstop():
+        fail_safe_trip("touchdown guard")
+        break
+    if i >= I_TOUCH:
+        surface_pos = pos_actual
+        break
+    if monotonic() >= touchdown_deadline:
+        fail_safe_trip("touchdown timeout")
+        break
+    descend(0.2)                            # mm/s, bounded by endstops
 
-# --- SETTLE: pre-form the whole part at v_start, fully immersed ---
-oled.coach(v_start)
-wait_until(current_tapered() and abs(v - v_start) < tol)
-arm_open_circuit_channel()                      # un-blank now that we're wet
+# --- SETTLE: pre-form the whole part at v_start, fully immersed. ---
+if state == "TOUCHDOWN":
+    fully_submerged_pos = surface_pos + part_length + CLEARANCE
+    cutoff_pos = surface_pos + ARC_MARGIN
+    travel_span = fully_submerged_pos - cutoff_pos
+    descend_to(fully_submerged_pos, bounded=True)
+    state = "SETTLE"
+    oled.coach(v_start)
+    wait_until(current_tapered(), timeout=SETTLE_TIMEOUT)
+    if not voltage_in_window(v_start, tol):
+        fail_safe_trip("settle voltage")
+    else:
+        arm_open_circuit_channel()
+        state = "SWEEP"
 
-# --- 20 Hz loop during SWEEP ---
-v, i = ads_read()                               # volts at cell, amps
-v_peak = max(v_peak, v)                         # oxide remembers only the peak
+# --- Sweep loop, nominally 20 Hz; every iteration must complete safely. ---
+while state == "SWEEP":
+    v, i = ads_read()
+    v_peak = max(v_peak, v)                  # oxide remembers only the peak
+    if v > V_MAX_SOFT or latch_set():
+        fail_safe_trip("voltage or hardware latch")
+        break
+    if i > I_LIMIT or (i < I_MIN and v > OPEN_VOLTAGE):
+        fail_safe_trip("current fault")
+        break
 
-frac    = interp_inverse(TABLE, v_peak)         # volts -> fraction of length
-pos_cmd = surface_pos - frac * part_length       # -> carriage millimetres
-if abs(pos_cmd - pos_actual) > 0.1:              # deadband: no stepper chatter
-    move_towards(pos_cmd, max_rate=1.0)          # mm/s ceiling
+    frac = clamp(interp_inverse(TABLE, v_peak), 0.0, 1.0)
+    pos_cmd = fully_submerged_pos - frac * travel_span
+    if pos_actual <= cutoff_pos:
+        output_off()
+        state = "CLEAR"
+        break
+    if abs(pos_cmd - pos_actual) > 0.1:
+        move_towards(pos_cmd, max_rate=1.0)
 
-if MODE == COACHED:
-    travelled = surface_pos - pos_actual
-    wanted = interp(TABLE, (travelled + step_ahead) / part_length)
-    oled.coach(wanted, actual=v, band=band_name_at(wanted))
-    if abs(v - wanted) > tol:
-        hold_axis()
-        buzzer.chirp()                           # eyes on the bath, not the panel
+    if MODE == "COACHED":
+        wanted = interp(TABLE, frac)
+        oled.coach(wanted, actual=v, band=band_name_at(wanted))
+        if v > wanted + tol:
+            fail_safe_trip("voltage too high for position")
+            break
+        if abs(v - wanted) > tol:
+            hold_axis()
+            buzzer.chirp()
+    if back_pressed():
+        fail_safe_trip("operator abort")
+        break
+    sleep(0.05)
 
-if latch_set():                                  # fault; HW already cut Q1
-    fault(latch_channel())
-if back_pressed():
-    abort()                                      # graceful: output off, retract
-if i > I_LIMIT:
-    fault("overcurrent")                        # software backstop only
-if i < I_MIN and v > 10:
-    fault("contact lost")                       # hardware channel is primary
-if dv_dt > SLEW_MAX:
-    fault("knob too fast")
-if surface_pos - pos_actual > part_length - arc_margin:
-    output_off()                                 # Q1 first, then K1
 
-# Log t, pos, v, v_peak, i, and the active recipe to CSV over USB every run.
+# Log t, pos, v, v_peak, i, interlock state, and the active recipe to CSV.
