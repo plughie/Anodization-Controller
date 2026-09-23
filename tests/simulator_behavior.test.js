@@ -50,9 +50,18 @@ assert.deepEqual(els.start.children.map((option) => option.textContent), [
   "PINK (75 V)", "DARK FUCHSIA (85 V)", "BLURPLE (92 V)", "PURPLE TEAL (95 V)",
   "TEAL GREEN (103 V)", "GREEN (105 V)"
 ], "all color and voltage labels must match the product page image names");
-assert.equal(colorForVoltage(75), "#df6d9f", "vendor Pink sample should render pink");
-assert.equal(colorForVoltage(92), "#665fd6", "vendor Blurple sample should render blurple");
-assert.equal(colorForVoltage(105), "#61bd65", "vendor Green sample should render green");
+assert.equal(colorForVoltage(15), "#7b3f27", "Dark Bronze should use the supplied swatch color");
+assert.equal(colorForVoltage(22), "#610F9D", "Purple should use the supplied swatch color");
+assert.equal(colorForVoltage(28), "#02418E", "Blue should use the supplied swatch color");
+assert.equal(colorForVoltage(40), "#C0D7DC", "Silver Blue should use the supplied swatch color");
+assert.equal(colorForVoltage(65), "#FFD006", "Gold should use the supplied swatch color");
+assert.equal(colorForVoltage(70), "#EB965F", "Rose Gold should use the supplied swatch color");
+assert.equal(colorForVoltage(75), "#FF7EDB", "Pink should use the supplied swatch color");
+assert.equal(colorForVoltage(85), "#D254E6", "Dark Fuchsia should use the supplied swatch color");
+assert.equal(colorForVoltage(92), "#8182F0", "Blurple should use the supplied swatch color");
+assert.equal(colorForVoltage(95), "#01EAFF", "Purple Teal should use the supplied swatch color");
+assert.equal(colorForVoltage(103), "#39E6C7", "Teal Green should use the supplied swatch color");
+assert.equal(colorForVoltage(105), "#3ADE87", "Green should use the supplied swatch color");
 renderVoltageSetpoints();
 assert.deepEqual(els.setpoints.children.map((marker) => marker.dataset.voltage), [
   "75.0", "80.0", "88.5", "93.5", "99.0", "104.0", "105.0"

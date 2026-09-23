@@ -102,7 +102,7 @@ coupon testing.
 
 ### 2.4 The operator turns the knob
 
-A programmable supply was priced and rejected (candidates included the GW Instek GPP-6030 and Chroma 6200-120; the cheap DPH8920 was disqualified because it caps at 96 V, below the green range). Verify the required GPP tracking-series configuration: its main channels are individually 0–60 V, while 120 V requires the documented series-tracking arrangement. A motorized variac, HV boost modules, a DAC-driven external pass element with a 1 °C/W heatsink — all evaluated and dropped as either expensive, unsafe, or thermally awkward.
+A programmable supply was previously rejected on cost/complexity grounds (candidates included the GW Instek GPP-6030 and Chroma 6200-120; the DPH8920 was disqualified because it caps at 96 V). A new potential system-level candidate, the KUAIQU SPPS-D1203-232, is recorded in the BOM section of `anodizer-controller-design.md` for evaluation as a possible fully MCU-controlled, hands-off process. Its USB interface and isolation are unconfirmed for the exact selected variant, and its listing conflicts on maximum power. This does not change the current manual-supply concept until those points are resolved and the control/safety architecture is reviewed.
 
 The project already owns a **0–120 V DC / 3 A bench supply**. Hand-adjusting it is free. The controller's job becomes measuring rather than commanding, which is both cheaper and a smaller safety surface.
 
@@ -275,6 +275,22 @@ Do not skip steps, and do not put electrolyte in the room before step 4.
 
 All precision analog is off-chip — the ADS1115 measures, the TMC2209 handles motor current. The MCU needs GPIO, two I²C buses, one UART, step timers and about 50 KB of flash. Every candidate is overqualified, so **choose on porting risk and supply chain, not performance.**
 
+### Manufacturing and sourcing requirements
+
+- **PCB fabrication and assembly target: JLCPCB.** Use JLCPCB for the
+  manufactured boards and the logic-board SMT assembly described below.
+- **Inventory priority:** prefer JLCPCB Basic parts when an electrically and
+  mechanically suitable option exists; JLCPCB Extended parts are acceptable
+  when needed.
+- **In-stock gate:** every part in the finalized procurement BOM must be
+  confirmed in stock at its selected supplier when the order is prepared. For
+  JLCPCB-assembled line items, use catalog parts currently marked in stock and
+  confirm available quantities cover the build (plus planned spares). Recheck
+  immediately before ordering because inventory status changes; do not silently
+  substitute an unavailable part.
+- If a required part is unavailable, pause the order and revise the BOM,
+  footprint, or approved source before manufacturing.
+
 | Chip | Dev board | SMT availability | Porting cost |
 |---|---|---|---|
 | RP2040 | Pico / Pico H / Pico WH | QFN-56, [JLCPCB C2761095](https://jlcpcb.com/partdetail/RaspberryPi-RP2040/C2761095) | Zero — GPIO numbering matches |
@@ -286,7 +302,7 @@ All precision analog is off-chip — the ADS1115 measures, the TMC2209 handles m
 
 ### DFM: split into two boards
 
-Send the **logic board** out for assembly. **Hand-build the HV sense and kill board yourself**, through-hole.
+Send the **logic board** out for assembly. **Hand-build the HV sense and kill board yourself**, through-hole. The provisional BOM calls for a keyed/shrouded header pair and matching ribbon assembly with at least eight usable conductors (seven currently identified plus one spare). Add unpopulated guard positions and the board slot as required by the final isolation layout; finalize the pinout, cable rating, and stock selection from the released netlist.
 
 A low-cost assembler will cheerfully place 0603 parts 0.3 mm apart across a 120 V divider and will not respect the isolation keepout without an explicit fab note plus a milled slot. That board also deserves personal inspection of every joint. Connect the two with a high-clearance keyed connector with unpopulated guard pins and a slot between them.
 

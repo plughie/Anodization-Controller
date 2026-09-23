@@ -10,13 +10,13 @@
   "use strict";
 
   const palette = [
-    ["HIGH POLISH", 0, 0, "#bac3cc"], ["DARK BRONZE", 15, 15, "#76533d"],
-    ["PURPLE", 22, 22, "#8f5bc7"], ["BLUE", 28, 28, "#3f78e8"],
-    ["SILVER BLUE", 40, 40, "#8da9cf"], ["GOLD", 65, 65, "#e2b93d"],
-    ["ROSE GOLD", 70, 70, "#c88772"], ["PINK", 75, 75, "#df6d9f"],
-    ["DARK FUCHSIA", 85, 85, "#bf287f"], ["BLURPLE", 92, 92, "#665fd6"],
-    ["PURPLE TEAL", 95, 95, "#777aa5"], ["TEAL GREEN", 103, 103, "#4da98c"],
-    ["GREEN", 105, 105, "#61bd65"]
+    ["HIGH POLISH", 0, 0, "#bac3cc"], ["DARK BRONZE", 15, 15, "#7b3f27"],
+    ["PURPLE", 22, 22, "#610F9D"], ["BLUE", 28, 28, "#02418E"],
+    ["SILVER BLUE", 40, 40, "#C0D7DC"], ["GOLD", 65, 65, "#FFD006"],
+    ["ROSE GOLD", 70, 70, "#EB965F"], ["PINK", 75, 75, "#FF7EDB"],
+    ["DARK FUCHSIA", 85, 85, "#D254E6"], ["BLURPLE", 92, 92, "#8182F0"],
+    ["PURPLE TEAL", 95, 95, "#01EAFF"], ["TEAL GREEN", 103, 103, "#39E6C7"],
+    ["GREEN", 105, 105, "#3ADE87"]
   ];
   const CONFIG = {
     // Faster animation rate for the browser model only. Firmware notes retain

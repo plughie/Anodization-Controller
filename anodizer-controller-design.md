@@ -511,9 +511,42 @@ These are conceptual software contracts. They do not replace a hardware watchdog
 | 1 | Polypropylene tank + Ti or 316 SS cathode plate | ~$25 |
 | 1 | Insulated enclosure, glands, standoffs, labels | ~$35 |
 
+### Logic-to-sense interconnect (provisional)
+
+| Qty | Part | Purpose | Status |
+|---:|---|---|---|
+| 2 | Keyed/shrouded header assemblies, one per board | Mating control/sense-board connectors | At least 8 usable circuits plus any unpopulated guard positions required by the isolation layout; part number, pitch, current rating, and stock TBD |
+| 1 | Matching multi-conductor ribbon cable assembly | Inter-board logic-side data and 5 V feed | At least 8 active conductors; length and cable/connector ratings TBD; use heavier-gauge 5 V/return conductors or a separate 2 A power pair if needed |
+
+The current block diagram identifies seven conductors: logic-side +5 V and
+return to the TMR 0522 primary, I²C SDA/SCL, output-enable, interlock feedback,
+and hardware-fault IRQ; the eighth is a spare. This is a provisional count, not
+a released pinout. The harness must terminate only on the logic/primary sides
+of the isolation components. Do not carry `HV_RETURN` or isolated secondary
+rails on this ribbon, and preserve the required creepage/clearance and board
+slot around its landing area. If a single ribbon cannot satisfy the insulation,
+voltage-drop, or current requirements, split the power pair into separate
+heavier-gauge insulated wires. Select stocked, keyed parts after the connector
+and isolation layout are finalized.
+
+### External supply candidates — system-level BOM (not PCB assembly)
+
+| Qty | Candidate | Status | Project fit and open checks |
+|---:|---|---|---|
+| 1 | KUAIQU SPPS-D1203-232, selected listing variant `spps-d1203-232-110v` ([product page](https://www.kuaiquinstrument.com/products/spps-d-232-black?variant=47218453184689)) | **Potential future candidate only**; not selected or purchased | Listed as 0–120 V / 3 A. The listing conflicts between 300 W and 360 W; expected use below 2 A at up to 105 V is about 210 W, but confirm the exact continuous rating. Fully MCU-controlled operation depends on the vendor confirming rear USB communications for this exact variant (USB is optional; the listing is RS232-branded), the USB driver/protocol applicability, USB-to-output isolation, and behavior on communication loss. The published Modbus document specifies serial-style control at 9600 baud, 8-N-1, with remote mode, setpoint/readback registers, and output control ([protocol](https://cdn.shopify.com/s/files/1/0705/8027/3329/files/modbus_protocol_2026-09-15.docx?v=1789454072)); verify these against the supplied unit. |
+
+This is a system-level supply option for a possible fully MCU-controlled,
+hands-off process, not an approved replacement for the currently described
+manual-supply setup. USB/Modbus commands must not replace the independent Q1/K1
+shutdown, interlocks, and electrode-pair discharge verification. Keep the
+existing power-supply isolation and loss-of-communications questions open until
+the manufacturer answers them and the integration is reviewed.
+
 **Cost estimate:** not currently reliable. The regulator, protection front end, DC-rated contactor, ballast, fuse, and isolation-test requirements remain TBD; recalculate the BOM after the schematic and hazard analysis are complete.
 
-Compared with the earlier programmable-supply plan, the hand-knob approach saves the supply cost and the entire HV generation and thermal subsystem — the pass element, its 1 °C/W heatsink and fan, the DAC and loop amplifiers.
+For the current manual-supply concept, the hand-knob approach avoids adding a
+programmable supply and the associated host-control path. The external supply
+candidate above is a separate future option and does not change this baseline.
 
 ---
 
@@ -557,6 +590,12 @@ One design decision already made this easy: **all the precision analog lives off
 
 ### DFM notes for the assembly house
 
+- **Manufacturing target: JLCPCB.** Prefer suitable in-stock Basic inventory
+  parts; Extended inventory is acceptable when necessary. Every finalized BOM
+  item must be confirmed in stock at its chosen supplier at order preparation,
+  with adequate quantity available. Recheck JLCPCB catalog stock immediately
+  before ordering; pause and revise the BOM rather than silently substituting an
+  unavailable part.
 - **Split the design into two boards.** Send the **logic board** out for assembly. Build the **HV sense and kill board by hand**, through-hole. Low-cost assemblers will happily put 0603 parts 0.3 mm apart across your 120 V divider, which is exactly what you do not want, and they will not respect an isolation keepout unless you make it a fab note plus a milled slot. That board also deserves your own eyes on every joint.
 - **Watch basic versus extended parts.** Extended components attract a per-part-type feeder fee, so consolidate passive values and prefer Basic parts where the choice is free ([JLCPCB assembly pricing](https://jlcpcb.com/help/article/pcb-assembly-price)).
 - **Keep GPIO numbers identical** between the dev board and the PCB. With RP2040 the chip's GPIO numbering already matches the Pico's labels, so firmware moves across untouched.
