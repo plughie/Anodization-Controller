@@ -23,6 +23,22 @@ interlocks, and use **BACK** to disable output and begin a graceful retract.
 This is a UI demonstration only; it does not implement the physical Pico
 firmware or provide a safety-rated control path.
 
+The simulator and extracted Python sketch currently model these additional
+behaviors:
+
+- The complete part is pre-formed while fully submerged at the recipe start
+  voltage, so the start color is the baseline across the wetted piece.
+- Formation settle is estimated from voltage tolerance plus a filtered current
+  transient plateau. Its slope threshold, minimum dwell, and timeout remain
+  commissioning placeholders.
+- Coached mode advances through the position-table voltage waypoints and holds
+  the actuator while the manually adjusted supply is outside tolerance.
+- The rendered part colors its submerged area at the current voltage and shows
+  the full selected palette at the completed gradient waypoint.
+- A supply setting of 0 V alone is not an extraction command in the current
+  implementation. Use **BACK** for a graceful abort/retract; reserve E-stop
+  for an emergency.
+
 ---
 
 ## 1. What the machine does
@@ -176,12 +192,18 @@ Part length is entered in millimetres, 10–99 mm, persisted to flash and latche
 2. Hold SELECT on RUN. The axis homes, finds the bath surface electrically, then submerges the part **deeper than gradient mode would**, since any part of the workpiece at or above the surface takes a different finish and a stray waterline band is the whole defect here.
 3. The display coaches you to the target voltage. Dial up; the buzzer stops when you are in the window.
 4. The part oscillates ±1 mm at about 0.5 Hz during formation. This sheds clinging hydrogen and oxygen bubbles, which otherwise leave streaks and comet marks — far more visible on a flat single color than on a gradient.
-5. Watch the taper bar. When formation completes the display reads **"dial to 0 V to extract."**
-6. **Dial the supply to zero and the machine lifts the part out.**
+5. Watch the taper bar. When formation completes, continue through the
+   coached run and use **BACK** for a graceful abort/retract.
+6. The current simulator and sketch do not treat dialing the supply to zero as
+   a motion command. A future zero-voltage extraction workflow would require a
+   separate validated state machine, discharge verification, and hardware
+   testing before being enabled.
 
-**Why the trigger is the knob and not a button.** Extraction happens at 0 V, which reduces the waterline-arc risk, but must not be treated as a guarantee that an arc cannot occur. The output-off state and discharge must be independently verified before extraction and before access to the bath.
-
-The trigger is gated on formation and debounced over 500 ms. A knob bump mid-formation will not yank a half-finished part out; if voltage hits zero before the film is formed the machine holds position and asks rather than guessing.
+**Why the current trigger is a button.** BACK makes the operator’s extraction
+intent explicit. A voltage drop can be accidental or caused by a fault, so the
+current conceptual implementation holds position rather than guessing. The
+output-off state and discharge must be independently verified before extraction
+and before access to the bath.
 
 ### 5.3 GRADIENT mode
 

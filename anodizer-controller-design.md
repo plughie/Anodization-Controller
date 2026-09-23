@@ -368,6 +368,7 @@ Note that the length never changes the voltage endpoints — those come from the
 ```python
 state = "IDLE"   # IDLE -> RECIPE -> HOMING -> TOUCHDOWN -> SETTLE -> SWEEP -> CLEAR -> DONE | FAULT
 v_peak = 0.0
+coach_index = 0
 
 def fail_safe_trip(reason):
     global state
@@ -413,6 +414,9 @@ if select_held(1000):                           # deliberate start
     validate_recipe(TABLE, V_MAX_SOFT)
     part_length = length_mm                     # LATCH: geometry frozen
     v_start, v_end = TABLE[0][0], TABLE[-1][0]
+    v_peak = 0.0
+    coach_index = 0
+    reset_coach_dwell()
     flash.save("length", length_mm)
     state = "HOMING"
 
@@ -444,8 +448,7 @@ if state == "TOUCHDOWN":
     descend_to(fully_submerged_pos, bounded=True)
     state = "SETTLE"
     oled.coach(v_start)
-    wait_until(current_tapered(), timeout=SETTLE_TIMEOUT)
-    if not voltage_in_window(v_start, tol):
+    if not wait_for_oxide_settle(v_start, SETTLE_TIMEOUT):
         fail_safe_trip("settle voltage")
     else:
         arm_open_circuit_channel()
@@ -462,7 +465,24 @@ while state == "SWEEP":
         fail_safe_trip("current fault")
         break
 
-    frac = clamp(interp_inverse(TABLE, v_peak), 0.0, 1.0)
+    if MODE == "COACHED":
+        # TABLE contains explicit voltage waypoints. The controller holds
+        # position until the operator dials each waypoint into tolerance.
+        wanted, frac = TABLE[coach_index]
+        oled.coach(wanted, actual=v, band=band_name_at(wanted))
+        if abs(v - wanted) > tol:
+            hold_axis()
+            buzzer.chirp()
+            sleep(0.05)
+            continue
+        if coach_in_band_for() >= COACH_DWELL and coach_index < len(TABLE) - 1:
+            coach_index += 1
+            reset_coach_dwell()
+            wanted, frac = TABLE[coach_index]
+            oled.coach(wanted, actual=v, band=band_name_at(wanted))
+    else:
+        frac = clamp(interp_inverse(TABLE, v_peak), 0.0, 1.0)
+
     pos_cmd = fully_submerged_pos - frac * travel_span
     if pos_actual <= cutoff_pos:
         output_off()
@@ -471,17 +491,9 @@ while state == "SWEEP":
     if abs(pos_cmd - pos_actual) > 0.1:
         move_towards(pos_cmd, max_rate=1.0)
 
-    if MODE == "COACHED":
-        wanted = interp(TABLE, frac)
-        oled.coach(wanted, actual=v, band=band_name_at(wanted))
-        if v > wanted + tol:
-            fail_safe_trip("voltage too high for position")
-            break
-        if abs(v - wanted) > tol:
-            hold_axis()
-            buzzer.chirp()
     if back_pressed():
-        fail_safe_trip("operator abort")
+        output_off()
+        state = "CLEAR"
         break
     sleep(0.05)
 ```

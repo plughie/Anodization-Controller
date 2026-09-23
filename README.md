@@ -29,6 +29,25 @@ contains undefined hardware interfaces and deliberately fails closed in the
 illustrative control flow; it must not be connected to hardware without a
 complete electrical, firmware, and safety review.
 
+## Current conceptual behavior
+
+- The part is fully submerged and pre-formed at the recipe start voltage. At
+  the default 78.5 V start point, the whole wetted part receives the baseline
+  color before the lift begins.
+- Settle is estimated from the measured current transient: voltage must be in
+  tolerance and the filtered logarithmic current slope must remain below the
+  conceptual threshold for the required dwell. The threshold and timeout are
+  commissioning placeholders, not validated process limits.
+- In coached mode, the controller displays recipe waypoints such as 78.5 V,
+  83.8 V, 94.5 V, and 100 V. It holds the actuator outside the voltage window,
+  then advances after a stable in-window dwell.
+- The visualization colors the entire currently submerged portion at the
+  current voltage. At the completed recipe waypoint it renders all selected
+  palette colors as the requested spatial gradient or rainbow.
+- **BACK** is the explicit graceful-abort command: output off, then retract.
+  Turning the manual supply to 0 V by itself does not command motion in the
+  current simulator or sketch. E-stop remains the independent emergency path.
+
 ## Simulator
 
 Open [`simulator.html`](simulator.html) in a modern browser. Set the manual
