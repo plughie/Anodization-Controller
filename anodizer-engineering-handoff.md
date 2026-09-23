@@ -102,7 +102,7 @@ coupon testing.
 
 ### 2.4 The operator turns the knob
 
-A programmable supply was previously rejected on cost/complexity grounds (candidates included the GW Instek GPP-6030 and Chroma 6200-120; the DPH8920 was disqualified because it caps at 96 V). A new potential system-level candidate, the KUAIQU SPPS-D1203-232, is recorded in the BOM section of `anodizer-controller-design.md` for evaluation as a possible fully MCU-controlled, hands-off process. Its USB interface and isolation are unconfirmed for the exact selected variant, and its listing conflicts on maximum power. This does not change the current manual-supply concept until those points are resolved and the control/safety architecture is reviewed.
+A programmable supply was previously rejected on cost/complexity grounds (candidates included the GW Instek GPP-6030 and Chroma 6200-120; the DPH8920 was disqualified because it caps at 96 V). An order has now been placed for the KUAIQU SPPS-D1203-232 as a possible fully MCU-controlled, hands-off system-supply candidate. Manufacturer documentation is pending. The project owner reports that the vendor confirmed USB Modbus RTU and galvanic isolation between USB communication ground and output ground; exact ratings and communication-loss behavior remain to be verified from the documentation and on the received unit. The product listing also conflicts on maximum power. The current manual-supply concept remains the baseline until the interface and control/safety architecture are reviewed.
 
 The project already owns a **0–120 V DC / 3 A bench supply**. Hand-adjusting it is free. The controller's job becomes measuring rather than commanding, which is both cheaper and a smaller safety surface.
 

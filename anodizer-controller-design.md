@@ -533,14 +533,14 @@ and isolation layout are finalized.
 
 | Qty | Candidate | Status | Project fit and open checks |
 |---:|---|---|---|
-| 1 | KUAIQU SPPS-D1203-232, selected listing variant `spps-d1203-232-110v` ([product page](https://www.kuaiquinstrument.com/products/spps-d-232-black?variant=47218453184689)) | **Potential future candidate only**; not selected or purchased | Listed as 0–120 V / 3 A. The listing conflicts between 300 W and 360 W; expected use below 2 A at up to 105 V is about 210 W, but confirm the exact continuous rating. Fully MCU-controlled operation depends on the vendor confirming rear USB communications for this exact variant (USB is optional; the listing is RS232-branded), the USB driver/protocol applicability, USB-to-output isolation, and behavior on communication loss. The published Modbus document specifies serial-style control at 9600 baud, 8-N-1, with remote mode, setpoint/readback registers, and output control ([protocol](https://cdn.shopify.com/s/files/1/0705/8027/3329/files/modbus_protocol_2026-09-15.docx?v=1789454072)); verify these against the supplied unit. |
+| 1 | KUAIQU SPPS-D1203-232, selected listing variant `spps-d1203-232-110v` ([product page](https://www.kuaiquinstrument.com/products/spps-d-232-black?variant=47218453184689)) | **Ordered; manufacturer documents pending; not received or bench-tested** | Listed as 0–120 V / 3 A. The listing conflicts between 300 W and 360 W; expected use below 2 A at up to 105 V is about 210 W, but confirm the exact continuous rating. Per vendor correspondence relayed by the project owner (2026-09-23), the optional USB interface supports standard Modbus RTU and its communication ground is galvanically isolated from the output-voltage ground. The published protocol lists 9600 baud, 8-N-1, remote mode, setpoint/readback registers, and output control ([protocol](https://cdn.shopify.com/s/files/1/0705/8027/3329/files/modbus_protocol_2026-09-15.docx?v=1789454072)). Review the incoming docs for exact-model applicability, isolation working/withstand ratings, output behavior on communication loss, and the power-rating discrepancy before integration. |
 
-This is a system-level supply option for a possible fully MCU-controlled,
-hands-off process, not an approved replacement for the currently described
+This is an ordered system-level candidate for a possible fully MCU-controlled,
+hands-off process, not yet an approved replacement for the currently described
 manual-supply setup. USB/Modbus commands must not replace the independent Q1/K1
-shutdown, interlocks, and electrode-pair discharge verification. Keep the
-existing power-supply isolation and loss-of-communications questions open until
-the manufacturer answers them and the integration is reviewed.
+shutdown, interlocks, and electrode-pair discharge verification. The vendor
+reports galvanic isolation between USB communication ground and output ground;
+review the incoming documentation and test the exact unit before integrating it.
 
 **Cost estimate:** not currently reliable. The regulator, protection front end, DC-rated contactor, ballast, fuse, and isolation-test requirements remain TBD; recalculate the BOM after the schematic and hazard analysis are complete.
 
