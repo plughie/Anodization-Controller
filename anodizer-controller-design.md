@@ -4,6 +4,30 @@
 
 **Status:** untested conceptual design. The circuit, protection system, firmware, motion geometry, and process limits are not validated for construction or energized operation.
 
+## Review corrections — supersede earlier conceptual shorthand
+
+This document is a design study, not an authoritative wiring diagram or a
+completed prototype. Every active state must run the same interlock,
+measurement-validity, overvoltage, current, hardware-latch, contact, and motion
+checks. A trip latches until Reset; releasing an interlock or turning the
+manual supply to 0 V does not resume or extract a run.
+
+The state sequence is `IDLE → HOMING → TOUCHDOWN → SUBMERGE → SETTLE → SWEEP` or
+`UNIFORM_HOLD → DISCHARGE → RETRACT → DONE/ABORTED`, with `FAULT` latched when
+shutdown or discharge cannot be verified. Q1 command state, K1 command/state,
+and voltage measured directly across the electrode pair are separate signals.
+Output-off is a command, not proof of de-energization. Retraction and access
+are permitted only after both interrupting devices are confirmed open and the
+electrode-pair voltage is below a qualified access threshold.
+
+The schematic is not yet authoritative. The supply return, cathode, anode,
+Q1/shunt nodes, K1 placement, isolated grounds, signal barriers, trip truth
+table, watchdog/permit circuit, stored-energy locations, and insulation class
+must be resolved in one reviewed schematic before construction. The Pico must
+remain behind the required barrier; the earlier idea of floating the controller
+on `HV_RETURN` is removed from build guidance. The TMR 0522 test-voltage number
+is not by itself a protective-isolation claim.
+
 You turn the knob. The machine decides where the waterline belongs.
 
 That inverts the usual design and deletes most of the expensive parts: no DAC into the supply, no linear pass element, no 100 W heatsink, no poking around inside a working instrument.
@@ -47,7 +71,7 @@ That inverts the usual design and deletes most of the expensive parts: no DAC in
    │   GP11     isolated E-stop / interlock feedback
    │   GP12/13  endstop TOP / BOTTOM
    │   GP15     piezo buzzer (out-of-tolerance / fault alert)
-   │   GP16/17  I²C1 → SSD1306 128×64 OLED
+   │   GP16/17  I²C0 → SSD1306 128×64 OLED; resolve bus/pin allocation with ADS1115
    │   GP18/19  rotary encoder A / B
    │   GP20     SELECT button
    │   GP21     BACK button
@@ -61,17 +85,24 @@ That inverts the usual design and deletes most of the expensive parts: no DAC in
 
 ## 2. The control concept
 
-The oxide color at any point on the part is set by the **highest** voltage that point saw while wet, and it does not thin back down. So:
-
-- the controller tracks `V_peak = max(V_measured)` and ignores any dip if you back the knob off;
-- the axis only ever rises, which makes the loop unconditionally monotonic and trivially stable;
-- position command comes from your calibration table inverted: `pos = g(V_peak)`.
+The oxide color at any point on the part is set by the **highest** voltage that
+point saw while wet; lowering voltage cannot undo it. The carriage command is
+separate from this color history: it is recalculated from the current measured
+voltage and the recipe table on every control update. Raising voltage moves the
+carriage up; lowering it moves the carriage back down. The per-section peak
+voltage remains latched for the color rendering.
 
 ### Two operating modes worth building
 
 **Mode 1 — Voltage-following.** You free-run the knob; the axis chases. Simple, feels good, one real hazard: nothing limits how fast you can turn the knob. Crank it 20 V in a second and the mechanism cannot lift that fast, so a still-immersed section gets over-formed and you lose that band. Guard it in firmware with a slew limit — if `dV/dt` exceeds what the axis can track, or if position error exceeds a band, drop the output and show the fault.
 
-**Mode 2 — Coached.** The MCU owns the schedule. The display shows the voltage to dial right now, and the axis advances only while the measured voltage sits inside the tolerance window. A piezo buzzer chirps while you are outside it, so you can watch the bath instead of the panel. Slow, erratic, or interrupted human input is absorbed automatically, and the failure mode is a pause rather than a ruined band.
+**Mode 2 — Coached.** The display shows the recipe's programmed voltage
+markers, while the axis continuously tracks the measured voltage in either
+direction through the selected mapping. Equal-band mode allocates one equal
+physical segment per selected color; linear mode maps the endpoints linearly.
+If motion lags a rapid knob adjustment, the carriage continues toward the
+corresponding position at its bounded rate. This behavior is a conceptual model,
+not a validated tracking or coating process.
 
 Build Mode 2 as the default and Mode 1 as an expert option. Mode 2 is also what makes the whole hand-adjusted approach genuinely competitive with a programmable supply — the machine keeps the position and the voltage in register no matter how clumsy the knob work is.
 
@@ -174,7 +205,7 @@ The fix is a small analog detector on the sense board, referenced to HV_RETURN a
 
 | Channel | Signature | Threshold |
 |---|---|---|
-| **ARC** | Broadband current chatter. Real anodizing current is smooth and slowly tapering; an arc is high-frequency hash. AC-coupling the shunt above ~1.6 kHz makes the discrimination almost trivial | Tune on a deliberately induced arc during commissioning |
+| **ARC** | Broadband current chatter. Real anodizing current is smooth and slowly tapering; an arc is high-frequency hash. AC-coupling the shunt above ~1.6 kHz is a proposed discriminator | Set only with a controlled injected transient or enclosed qualified fixture; never draw an open-bench arc |
 | **OVERCURRENT** | Hard short, part touching the cathode | ~1.5× your working current |
 | **OPEN CIRCUIT** | Contact lost, part fell off, lead broken — current near zero while voltage stands up | I < 5 mA with V > 10 V, **blanked** until the MCU asserts "submerged and settled", since zero current is legitimate before immersion |
 | **COLLAPSE** | Voltage dragged down by a low-impedance fault | V < 50% of the last settled value |
@@ -193,7 +224,10 @@ Do not route the enable over I²C. A hung bus would leave the output stuck on, w
 
 **Why an SR latch rather than a comparator straight to the gate:** an arc is intermittent by nature, so a non-latching trip would chatter the output on and off and make things worse. The latch captures the first event, holds Q1 off, and requires an explicit acknowledgement to clear. Total response — comparator propagation, latch, MOSFET turn-off — is a few microseconds, roughly a thousand times faster than the firmware path.
 
-Because Q1 sits in series with the cell, opening it interrupts the loop including your supply's output capacitance, so there is no stored charge left to sustain the arc. K1 then opens at zero current as before.
+Opening Q1 interrupts the source-fed loop but does not prove that the supply,
+cell, wiring, or parasitic capacitance is discharged. K1 state and the actual
+electrode-pair voltage must be verified after shutdown. The 100 kΩ bleed and
+its discharge time remain schematic/calculation items, not safety evidence.
 
 **Optional fifth channel, and you have the gear for it:** arcs radiate broadband RF. A small pickup loop near the cell into a diode envelope detector and a comparator gives a trip channel that shares no failure mode with the current path. Independent detection physics is genuinely valuable in a protection system — and you will hear the same signature on a receiver nearby, which is a decent way to characterise it before you set the threshold.
 
@@ -212,7 +246,7 @@ Detection is the backstop. The primary defence is not creating the arc:
 
 ## 5. Motion axis
 
-NEMA 17 with integrated 150 mm T8 lead screw, TMC2209 in UART mode. At 8 mm/rev and 16× microstepping one microstep is 2.5 µm — orders of magnitude finer than the meniscus blur, so resolution is a non-issue and you can run conservative acceleration.
+NEMA 17 with integrated 150 mm T8 lead screw, TMC2209 in UART mode. At 8 mm/rev and 16× microstepping one microstep is 2.5 µm — orders of magnitude finer than the meniscus blur. The 150 mm screw is not a demonstrated 150 mm usable stroke, and low-speed StallGuard readings are not accepted as the sole suspension-integrity sensor; actual position, endstops, travel limits, and motor-power-loss behavior require independent validation.
 
 - Home against the **top** endstop at boot; bottom endstop is a sanity limit.
 - Sweep rate 0.3–1.0 mm/s. A 60 mm part takes 1–3 minutes, which gives each band time to reach terminal oxide thickness.
@@ -241,7 +275,9 @@ Three controls is the right number. The encoder scrolls fields and values, SELEC
 - Debounce in firmware, 5 ms on the buttons. For the encoder use the RP2040's PIO or an interrupt-driven quadrature state machine rather than polling — mechanical encoders generate enough edge noise to lose counts otherwise.
 - Cheap detented encoders are typically 20 detents per revolution with 4 counts per detent. Decode at full quadrature, then divide, so one detent equals one increment. Without that, every click jumps by four.
 - **Acceleration on the length field.** Hold the encoder turning and step by 5 mm instead of 1 mm after the first half-turn, or crossing 10→99 mm takes 89 clicks.
-- **BACK during a run is a graceful abort:** output off (Q1 then K1), then retract at normal speed. It is not a substitute for the E-stop, which stays a hardwired latching mushroom independent of the Pico.
+- **BACK during a run requests a graceful abort:** command Q1 then K1 off,
+  verify electrode-pair discharge, then retract. It is not a substitute for the
+  E-stop, which stays a hardwired latching mushroom independent of the Pico.
 
 ### 6.2 Part length entry
 
@@ -255,35 +291,58 @@ The tradeoff against a potentiometer is worth naming: a pot would be absolute an
 
 ### 6.2 The color palette
 
-Store a calibrated palette in flash rather than a raw voltage table. Each entry is a name and the voltage window that produces it in *your* bath:
+The simulator and sketch include the product's 13 named swatches and the
+nominal voltages encoded in their image filenames. These values describe the
+vendor's sample names, not validated voltage windows or guaranteed results in
+this project's bath. `HIGH POLISH (0 V)` means no anodizing and is excluded from
+recipes. Calibrate actual ranges on coupons for the specific alloy, bath, and
+setup before use.
 
-```python
-PALETTE = [                      # name,      V_low, V_high
-    ("BRONZE",   15, 18), ("VIOLET",   20, 25),
-    ("BLUE",     30, 40), ("TEAL",     45, 50),
-    ("GOLD",     52, 58), ("ROSE",     62, 68),
-    ("MAGENTA",  75, 82), ("CYAN",     86, 92),
-    ("GREEN",    96, 104),
-]
-```
+| Swatch | Nominal voltage | Swatch | Nominal voltage |
+|---|---:|---|---:|
+| High Polish | 0 V (no anodizing) | Dark Bronze | 15 V |
+| Purple | 22 V | Blue | 28 V |
+| Silver Blue | 40 V | Gold | 65 V |
+| Rose Gold | 70 V | Pink | 75 V |
+| Dark Fuchsia | 85 V | Blurple | 92 V |
+| Purple Teal | 95 V | Teal Green | 103 V |
+| Green | 105 V | | |
 
-Published charts put gold/bronze near 10-18 V, purple at 18-25 V, blue at 30-40 V, gold again near 50-55 V and teal/green at 80-100 V, with red physically unobtainable through interference ([DFocus](https://dfocusrp.com/resources/titanium-anodizing-color-chart/), [Hontitan](https://hontitan.com/how-to-anodize-titanium-at-home/), [MonsterBolts](https://monsterbolts.com/pages/anodized-titanium-color-chart)). Seed the palette from those, then **overwrite every window from your own coupons** — the relationship shifts with alloy, electrolyte concentration and bath age. Put a PALETTE EDIT screen in the menu so you can nudge a window by a volt after a run without reflashing.
+Source: [Painful Pleasures, 16g internally threaded titanium bent barbell](https://www.painfulpleasures.com/products/titanium-16g-bent-barbell-internally-threaded-curved-barbell); the nominal values and names were read from the filenames of the page's color-swatch images. The page's “DarkFushia” filename is normalized to “Dark Fuchsia” here.
+
+The swatch labels and nominal voltages are a seed list only. Establish actual
+color windows experimentally from coupons in the project's own bath and alloy;
+color/voltage relationships vary with material, electrolyte, surface finish,
+and process conditions.
 
 ### 6.3 Recipe entry flow
 
 ```
  IDLE                              LENGTH  47mm
-                                   >START  MAGENTA  75-82V
-                                    END    GREEN    96-104V
+                                   >START  PINK        75V
+                                    END    GREEN      105V
                                     SPREAD EQUAL BANDS
                                     PREVIEW / RUN
 
- PREVIEW                            47mm  78.5 -> 100 V   estimate only
-   +--------+  GREEN    100V   0.0mm
-   |  gradient  CYAN     89V  15.7mm
-   |  bar      MAGENTA  78.5V 31.3mm   band widths 15.7mm  OK
-   +--------+           settle 78.5V, 3 colors, estimate only
+ PREVIEW                            47mm  75 -> 105 V   estimate only
+   +--------+  GREEN       105V   top / first exposed section
+   |  gradient  TEAL GREEN 103V   vendor sample
+   |            PURPLE TEAL 95V   vendor sample
+   |            BLURPLE      92V   vendor sample
+   |            DARK FUCHSIA 85V   vendor sample
+   |  bar      PINK         75V   bottom / last exposed section
+   +--------+           6 colors, equal physical bands, estimate only
 ```
+
+Preview coordinates are physical: `top` is the carriage-side end and `bottom`
+is the suspended end. The simulator currently reserves the 5 mm full-submersion
+clearance and a 3 mm wet-side cutoff margin in its motion span. At final cutoff,
+Q1/K1 are commanded off with the part's tip still 3 mm below the modeled
+waterline; retraction waits for discharge verification. For a 47 mm part with
+the current conceptual coordinates, nominal positions are 114.4 mm at
+formation, then about 106.2, 98.1, 89.9, 81.7, and 73.6 mm at the five
+equal-band boundaries, and 65.4 mm at final cutoff. These are model coordinates only; meniscus,
+drainage blur, and the actual sensor-to-carriage datum remain unvalidated.
 
 Encoder scrolls fields, SELECT enters a list and commits, BACK steps up. Store five named recipe slots in flash so a repeat display piece is one recall away.
 
@@ -302,16 +361,22 @@ The preview screen should flag any band narrower than about 1.5 mm, since that i
 
 Your instinct is correct, and for a concrete reason: **the upper voltage range delivers more color change per volt**, because the oxide is into higher interference orders. So a vibrant mid-to-end sweep needs a *narrower* voltage span than a full rainbow, and a narrower span across the same part length means a gentler gradient and wider, crisper bands.
 
-| Recipe | Span | On a 47 mm part | Band width per 6 V |
+| Endpoint example | Span | Average gradient on 47 mm | Approx. travel per 6 V in LINEAR mode |
 |---|---|---|---|
-| Full rainbow, BRONZE -> GREEN | 15 -> 100 V, 85 V | 1.81 V/mm | ~3.3 mm |
-| MAGENTA -> GREEN | 78 -> 100 V, 22 V | 0.47 V/mm | ~12.8 mm |
+| Dark Bronze -> Green | 15 -> 105 V, 90 V | 1.91 V/mm | ~3.1 mm |
+| Pink -> Green | 75 -> 105 V, 30 V | 0.64 V/mm | ~9.4 mm |
 
-The vibrant recipe is roughly four times more forgiving of knob speed, position error and meniscus blur. It also works on much shorter parts — a full rainbow stops resolving below roughly 30 mm, where a MAGENTA-to-GREEN sweep is still clean at 15 mm.
+These endpoint calculations are illustrative only; they are not calibrated color
+widths or validated process guidance. EQUAL BANDS uses piecewise voltage
+boundaries to create equal physical widths, while LINEAR distributes voltage
+evenly along travel.
 
 Two things to get right for high-range recipes:
 
-- **Pre-form the whole part at V_start before lifting.** Fully immersed, settle at 78 V, let current taper. Because color is set by the peak voltage a spot saw while wet, this puts the entire part at the magenta baseline, and the lift then pushes progressively more of it higher. Without the settle, the top of the part is pale and the effect collapses.
+- **Pre-form the whole part at V_start before lifting.** For the selected
+  Pink-to-Green example, fully immersed, settle at the nominal 75 V Pink sample
+  and let current taper. This is an illustrative setpoint, not a bath-calibrated
+  process limit.
 - **Cap V_max around 105 V.** Above that you risk anodic breakdown — sparking, burnt patches and pitting, which are not recoverable without repolishing. Make the ceiling a firmware constant with an override you have to hold the encoder down to change.
 
 ### 6.6 How one number sets both scales
@@ -340,23 +405,26 @@ This self-calibrates bath level every run, so evaporation, refills and tank swap
 
 | Scale | Derivation |
 |---|---|
-| Travel span | `part_length + CLEARANCE - ARC_MARGIN`, fully submerged start to output cutoff |
+| Travel span | `fully_submerged_pos - cutoff_pos`; current model is `part_length + CLEARANCE - ARC_MARGIN` |
 | Position of a band boundary | `fully_submerged_pos - frac x travel_span` |
 | Voltage gradient | `(V_end - V_start) / part_length` volts per millimetre |
-| Submersion depth | `part_length + CLEARANCE` below `surface_pos` |
+| Submersion depth | `part_length + CLEARANCE` below `surface_pos`; this clearance is not a color band |
 
-**Worked example — 47 mm part, MAGENTA to GREEN, EQUAL BANDS:**
+**Worked example — 47 mm part, PINK to GREEN, EQUAL BANDS:**
 
 ```
 LENGTH = 47 mm      -> SELECT-hold latches part_length = 47 mm
-recipe 78.5 -> 100 V  -> 3 colors -> 15.67 mm per band
+recipe 75 -> 105 V  -> 6 colors -> 8.17 mm per band
 touchdown found at carriage_pos = 62.4 mm
-submerge to 62.4 + 47 + 5 = 114.4 mm, settle at 78.5 V until current tapers
-  fraction 0.00  dial 78.5 V  carriage 114.4 mm  MAGENTA baseline
-  fraction 0.33  dial 83.75 V  carriage 98.1 mm   MAGENTA/CYAN boundary
-  fraction 0.67  dial 94.50 V  carriage 81.7 mm   CYAN/GREEN boundary
-  fraction 1.00  dial 100 V  carriage 65.4 mm   GREEN endpoint
-output off 3 mm before the last wet contact
+submerge to 62.4 + 47 + 5 = 114.4 mm, settle at 75 V until current tapers
+  fraction 0.00  dial 75 V    carriage 114.4 mm  PINK baseline
+  fraction 0.17  dial 80 V    carriage 106.2 mm  PINK / DARK FUCHSIA boundary
+  fraction 0.33  dial 88.5 V  carriage 98.1 mm   DARK FUCHSIA / BLURPLE boundary
+  fraction 0.50  dial 93.5 V  carriage 89.9 mm   BLURPLE / PURPLE TEAL boundary
+  fraction 0.67  dial 99 V    carriage 81.7 mm   PURPLE TEAL / TEAL GREEN boundary
+  fraction 0.83  dial 104 V   carriage 73.6 mm   TEAL GREEN / GREEN boundary
+  fraction 1.00  dial 105 V   carriage 65.4 mm   GREEN endpoint / wet-side cutoff
+Q1/K1 off with 3 mm of the lower tip still submerged; verify discharge, then retract
 ```
 
 Note that the length never changes the voltage endpoints — those come from the recipe. Length only stretches the spatial axis, which is to say it sets the gradient.
@@ -365,142 +433,16 @@ Note that the length never changes the voltage endpoints — those come from the
 
 ## 7. Firmware sketch
 
-```python
-state = "IDLE"   # IDLE -> RECIPE -> HOMING -> TOUCHDOWN -> SETTLE -> SWEEP -> CLEAR -> DONE | FAULT
-v_peak = 0.0
-coach_index = 0
+The authoritative conceptual state-machine sketch is [`controller_firmware.py`](controller_firmware.py). The earlier inline excerpt has been removed because it duplicated safety logic and could drift from the simulator. The sketch and simulator now share these requirements:
 
-def fail_safe_trip(reason):
-    global state
-    output_off()             # Q1 first; hardware latch remains authoritative
-    hold_axis()
-    set_k1(False)
-    record_fault(reason)
-    state = "FAULT"
+- common safety supervision in every active state;
+- low-energy touchdown validation with a timeout and contact threshold;
+- latched recipes and a separate fully-submerged UNIFORM hold;
+- motion/position error and completion timeouts;
+- explicit Q1/K1 shutdown followed by electrode-pair discharge verification; and
+- deliberate reset after FAULT, with separate DONE and ABORTED outcomes.
 
-# --- build the position→voltage map from the recipe ---
-def build_table(start_idx, end_idx, spread):
-    band = PALETTE[start_idx:end_idx + 1]
-    if not band:
-        raise ValueError("empty recipe")
-    centers = [(c[1] + c[2]) / 2 for c in band]
-    if spread == "LINEAR":
-        if len(centers) < 2 or centers[0] >= centers[-1]:
-            raise ValueError("LINEAR requires two increasing endpoints")
-        return [(centers[0], 0.0), (centers[-1], 1.0)]
-    if spread != "EQUAL_BANDS":
-        raise ValueError("unknown spread mode")
-    if len(centers) == 1:
-        return [(centers[0], 0.0), (centers[0], 1.0)]
-    # n colors produce n equal physical bands. Intermediate voltages are
-    # boundaries between adjacent validated color centers.
-    table = [(centers[0], 0.0)]
-    n = len(centers)
-    for k in range(1, n):
-        boundary = (centers[k - 1] + centers[k]) / 2
-        table.append((boundary, k / n))
-    table.append((centers[-1], 1.0))
-    return table
-
-# --- IDLE / RECIPE: encoder scrolls, SELECT commits, BACK steps up ---
-length_mm = clamp(flash.load("length", 47), 10, 99)
-TABLE = build_table(start_idx, end_idx, spread)
-band_count = end_idx - start_idx + 1
-if spread == "EQUAL_BANDS" and length_mm / band_count < 1.5:
-    oled.warn("band width < 1.5mm")
-
-if select_held(1000):                           # deliberate start
-    validate_interlocks_closed()
-    validate_recipe(TABLE, V_MAX_SOFT)
-    part_length = length_mm                     # LATCH: geometry frozen
-    v_start, v_end = TABLE[0][0], TABLE[-1][0]
-    v_peak = 0.0
-    coach_index = 0
-    reset_coach_dwell()
-    flash.save("length", length_mm)
-    state = "HOMING"
-
-# --- TOUCHDOWN: find the bath surface with a validated low voltage. ---
-if state == "HOMING":
-    home_axis_with_limits()
-    state = "TOUCHDOWN"
-    oled.coach(TOUCHDOWN_V)
-    enable_output_only_if_interlocks_are_closed()
-touchdown_deadline = monotonic() + TOUCHDOWN_TIMEOUT
-while state == "TOUCHDOWN":
-    v, i = ads_read()
-    if v > V_MAX_SOFT or latch_set() or bottom_endstop():
-        fail_safe_trip("touchdown guard")
-        break
-    if i >= I_TOUCH:
-        surface_pos = pos_actual
-        break
-    if monotonic() >= touchdown_deadline:
-        fail_safe_trip("touchdown timeout")
-        break
-    descend(0.2)                                # mm/s, bounded by endstops
-
-# --- SETTLE: pre-form the whole part at v_start, fully immersed ---
-if state == "TOUCHDOWN":
-    fully_submerged_pos = surface_pos + part_length + CLEARANCE
-    cutoff_pos = surface_pos + ARC_MARGIN
-    travel_span = fully_submerged_pos - cutoff_pos
-    descend_to(fully_submerged_pos, bounded=True)
-    state = "SETTLE"
-    oled.coach(v_start)
-    if not wait_for_oxide_settle(v_start, SETTLE_TIMEOUT):
-        fail_safe_trip("settle voltage")
-    else:
-        arm_open_circuit_channel()
-        state = "SWEEP"
-
-# --- Sweep loop, nominally 20 Hz; every iteration must complete safely. ---
-while state == "SWEEP":
-    v, i = ads_read()
-    v_peak = max(v_peak, v)                     # oxide remembers only the peak
-    if v > V_MAX_SOFT or latch_set():
-        fail_safe_trip("voltage or hardware latch")
-        break
-    if i > I_LIMIT or (i < I_MIN and v > OPEN_VOLTAGE):
-        fail_safe_trip("current fault")
-        break
-
-    if MODE == "COACHED":
-        # TABLE contains explicit voltage waypoints. The controller holds
-        # position until the operator dials each waypoint into tolerance.
-        wanted, frac = TABLE[coach_index]
-        oled.coach(wanted, actual=v, band=band_name_at(wanted))
-        if abs(v - wanted) > tol:
-            hold_axis()
-            buzzer.chirp()
-            sleep(0.05)
-            continue
-        if coach_in_band_for() >= COACH_DWELL and coach_index < len(TABLE) - 1:
-            coach_index += 1
-            reset_coach_dwell()
-            wanted, frac = TABLE[coach_index]
-            oled.coach(wanted, actual=v, band=band_name_at(wanted))
-    else:
-        frac = clamp(interp_inverse(TABLE, v_peak), 0.0, 1.0)
-
-    pos_cmd = fully_submerged_pos - frac * travel_span
-    if pos_actual <= cutoff_pos:
-        output_off()
-        state = "CLEAR"
-        break
-    if abs(pos_cmd - pos_actual) > 0.1:
-        move_towards(pos_cmd, max_rate=1.0)
-
-    if back_pressed():
-        output_off()
-        state = "CLEAR"
-        break
-    sleep(0.05)
-```
-
-Log `t, pos, v, v_peak, i`, interlock state, and the active recipe to CSV over USB every run. That log plus a photograph of the coupon is how the palette windows get refined, and the palette is what actually determines whether a display piece lands.
-
----
+These are conceptual software contracts. They do not replace a hardware watchdog, an independent permit/trip path, a reviewed schematic, or qualified commissioning.
 
 ## 8. Bill of materials
 
@@ -628,6 +570,6 @@ One design decision already made this easy: **all the precision analog lives off
 - Color/voltage charts: [DFocus](https://dfocusrp.com/resources/titanium-anodizing-color-chart/), [Hontitan](https://hontitan.com/how-to-anodize-titanium-at-home/), [MonsterBolts](https://monsterbolts.com/pages/anodized-titanium-color-chart)
 - [TI ISO1541 isolated I²C datasheet](https://www.ti.com/lit/ds/symlink/iso1541.pdf)
 - [Vishay IRFP460 datasheet](https://www.vishay.com/docs/91237/91237.pdf)
-- [TRACO TMR 2 series datasheet](https://www.tracopower.com/tmr2-datasheet)
+- [TRACO TMR 2 series datasheet](https://www.tracopower.com/tmr2-datasheet) — verify the required insulation class and continuous working voltage; the indexed listing describes functional insulation.
 - [Adafruit ADS1115](https://www.adafruit.com/product/1085) · [Adafruit TMC2209 breakout](https://www.adafruit.com/product/6121) · [Raspberry Pi Pico WH](https://www.raspberrypi.com/products/raspberry-pi-pico/)
-- Process background: [AMS-2471 current density notes](https://titanium.blog/standards/ams-2471/), [Caswell plating manual](https://tosih.org/files/books/caswell_inc_plating_manual.pdf)
+- Process background: replace the former AMS-2471 citation with titanium-specific evidence before deriving current-density or voltage limits; [Caswell plating manual](https://tosih.org/files/books/caswell_inc_plating_manual.pdf) remains background only.

@@ -17,7 +17,8 @@ This is a [Bug-Mag.net project](http://bug-mag.net) by Duv McIntyre.
 - `anodizer-controller-design.md` — circuit design, BOM, UI, and firmware sketch.
 - `titanium-anodizing-automation.md` — process, motion, power-supply, and safety notes.
 - `controller_firmware.py` — Python-formatted extraction of the palette and firmware pseudocode from the controller design note.
-- `simulator.html` — browser simulator for the manual supply, Pico WH controller logic, and lift actuator.
+- `simulator.html` and `simulator.js` — browser simulator for the manual supply, Pico WH controller logic, lift actuator, discharge check, and fault model.
+- `Anodization-Controller-Review.md` — local, ignored source/design review artifact when present; it is not part of the public repository.
 
 The conceptual controller target is a **Raspberry Pi Pico WH** (the Pico 1
 family with pre-soldered headers and wireless). The simulator exposes the same
@@ -31,32 +32,91 @@ complete electrical, firmware, and safety review.
 
 ## Current conceptual behavior
 
-- The part is fully submerged and pre-formed at the recipe start voltage. At
-  the default 78.5 V start point, the whole wetted part receives the baseline
-  color before the lift begins.
+The current simulator/reference sketch includes the first review remediation
+pass: discharge requires fresh, finite, non-negative electrode-pair readings
+below the access threshold for a short dwell; failed discharge remains a
+latched FAULT; E-stop/lid opening prevents automatic retraction; touchdown has
+enough timeout budget for the modeled travel; and invalid/negative current is
+rejected. These are software-model checks only and do not prove that a real
+Pico, power supply, switching path, or independent safety circuit will behave
+the same way.
+
+- The part descends slowly to the electrically detected surface, then continues
+  at the low touchdown voltage until it reaches the full-submersion coordinate.
+  Only then does it settle and pre-form at the recipe start voltage. At the
+  default 75 V start point, the whole wetted part receives the baseline color
+  before the lift begins.
 - Settle is estimated from the measured current transient: voltage must be in
   tolerance and the filtered logarithmic current slope must remain below the
   conceptual threshold for the required dwell. The threshold and timeout are
   commissioning placeholders, not validated process limits.
-- In coached mode, the controller displays recipe waypoints such as 78.5 V,
-  83.8 V, 94.5 V, and 100 V. It holds the actuator outside the voltage window,
-  then advances after a stable in-window dwell.
-- The visualization colors the entire currently submerged portion at the
-  current voltage. At the completed recipe waypoint it renders all selected
-  palette colors as the requested spatial gradient or rainbow.
-- **BACK** is the explicit graceful-abort command: output off, then retract.
-  Turning the manual supply to 0 V by itself does not command motion in the
-  current simulator or sketch. E-stop remains the independent emergency path.
+- In coached mode, the carriage tracks every measured-voltage change in either
+  direction through the selected recipe table. Equal-band mode allocates equal
+  physical width per color; linear mode maps voltage linearly between endpoints.
+  A voltage decrease moves the carriage back down, but does not undo the peak
+  color already formed on a section. Recipe overshoot, stale measurements,
+  open contact, overcurrent, overvoltage, interlock changes, and motion error
+  are latched faults.
+- UNIFORM is a separate process: one color is validated, the part remains fully
+  submerged after formation, and **BACK** requests extraction. It does not
+  follow the gradient table.
+- Output shutdown enters a discharge-verification state. The simulator models
+  Q1, K1, electrode-pair voltage, residual charge, and failed-switch
+  injections separately; retraction is not authorized until both switches are
+  open and the simulated electrode voltage is below the access threshold.
+- At the planned final cutoff, with the part's tip still 3 mm below the modeled
+  bath surface, Q1/K1 are commanded off and discharge is verified before the
+  actuator begins retracting. An earlier loss of supply output still latches
+  an open-cell fault.
+- Reaching the planned final recipe cutoff transitions directly to discharge
+  verification before the expected end-of-immersion current drop is checked as
+  an open-cell fault.
+- The visualization retains a peak-voltage history for each physical section.
+  DONE, ABORTED, and FAULT outcomes are distinct, and an aborted or unformed
+  run is not painted as a successful rainbow.
+- **BACK** is the explicit graceful-abort command. Turning the manual supply to
+  0 V by itself does not command motion. E-stop and lid interlock trips latch
+  until Reset; closing the lid or releasing E-stop does not resume a run.
 
 ## Simulator
 
 Open [`simulator.html`](simulator.html) in a modern browser. Set the manual
-bench-supply voltage and current limit, enable the simulated output, and press
-**SELECT (hold 1 s)** to begin the conceptual run. **BACK** disables the
-output and starts a graceful retract during an active run; **Reset** clears a
-latched fault or returns the simulator to idle. The simulator includes the
-Pico WH front-panel controls, controller display, actuator position, and
-voltage/current trace.
+bench-supply voltage to the low touchdown range first, set a current limit,
+enable the simulated output, and press **SELECT (hold 1 s)** to begin the
+conceptual run. The run then requires a low-energy touchdown, a measured
+formation settle, and the selected process sequence. **BACK** starts output
+shutdown and discharge verification before retraction; **Reset** is required
+after a fault and returns the simulator to idle. The fault selector exercises
+stale ADC data, open contact, stuck Q1/K1, motion stall, overcurrent, and slow
+discharge assumptions. The simulator includes the Pico WH front-panel
+controls, controller display, actuator position, exposure-history coloring,
+and voltage/current trace.
+
+The supply-output checkbox must be enabled before starting; a nonzero setpoint
+does not provide simulated electrode voltage while output is unavailable. The
+simulator blocks Run with a log message if the output is off and latches a fault
+if it is opened during touchdown, submersion, or formation.
+
+At 0 V, touchdown lowers the part toward the modeled bath surface and pauses
+there; zero volts cannot produce the current signal used to confirm electrical
+contact. Set a low nonzero touchdown voltage (at or below the conceptual 12 V
+limit) to confirm contact, then watch the same slow descent continue through
+full submersion before setting the recipe voltage. This modeled position is not
+a substitute for a physical surface or travel sensor. The browser animates
+this travel at 1 mm/s for usability; that is not a hardware speed
+recommendation, and the Python sketch retains its separate 0.2 mm/s placeholder.
+
+The voltage slider also shows triangle markers for the selected recipe's
+programmed setpoints. These include the start, color-boundary, and end
+voltages, with exact decimal values, as visual ramp targets; they are
+deliberately not clickable so the operator can move continuously between them.
+
+The simulator palette includes all 13 nominal color/voltage labels shown by
+the product page's color-swatch image filenames. `HIGH POLISH (0 V)` is shown
+for reference but disabled as a recipe endpoint because it represents no
+anodizing. Vendor labels and sample voltages are not calibrated limits for a
+particular bath or alloy; calibrate with coupons before treating them as
+process settings.
 
 ## Safety
 

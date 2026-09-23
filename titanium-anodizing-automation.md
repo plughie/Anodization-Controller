@@ -115,7 +115,11 @@ Potential supply classes and examples:
 
 ### GW Instek GPP-6030
 
-The GPP-6030 is listed as a 0–120 V, 0–3 A programmable supply. The GPP family provides computer interfaces and programmable functions suitable for automated voltage ramps and position-synchronized control.
+The GPP-6030 family supports the required voltage range only in the documented
+tracking-series configuration: its main channels are individually 0–60 V, while
+120 V operation is obtained by series tracking. Confirm the exact model,
+configuration, insulation, current limit, and manufacturer operating procedure
+before treating it as a 0–120 V source.
 
 Reference: [GW Instek GPP programmable DC power supplies](https://www.gwinstek.com/en-GB/products/downloadSeriesDownNew/21838/2128)
 
@@ -148,7 +152,9 @@ The actuator and its control electronics should be electrically isolated from th
 
 ## Process references
 
-- [Titanium anodizing current-density information](https://titanium.blog/standards/ams-2471/)
+- AMS2471 is an aluminum-alloy anodizing standard and is not a titanium process
+  specification. Do not use it to derive titanium voltage, current-density, or
+  color limits without titanium-specific evidence.
 - [Caswell plating manual](https://tosih.org/files/books/caswell_inc_plating_manual.pdf)
 - [Research on voltage-based coloring of Ti-6Al-4V](https://www.sciencedirect.com/science/article/pii/S0022391317301440)
 

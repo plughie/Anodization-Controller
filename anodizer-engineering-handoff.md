@@ -33,11 +33,18 @@ behaviors:
   commissioning placeholders.
 - Coached mode advances through the position-table voltage waypoints and holds
   the actuator while the manually adjusted supply is outside tolerance.
-- The rendered part colors its submerged area at the current voltage and shows
-  the full selected palette at the completed gradient waypoint.
-- A supply setting of 0 V alone is not an extraction command in the current
-  implementation. Use **BACK** for a graceful abort/retract; reserve E-stop
-  for an emergency.
+- The rendered part retains a per-section peak-voltage history. DONE, ABORTED,
+  and FAULT outcomes are distinct; an aborted or unformed run is not shown as
+  a completed rainbow.
+- A supply setting of 0 V alone is not an extraction command. Use **BACK** to
+  request a graceful abort; the controller must verify electrode-pair
+  discharge before retracting. Reserve E-stop for an emergency.
+
+> **Review correction:** This is an untested conceptual design, not a built
+> prototype. The current simulator and sketch model latched faults, low-energy
+> touchdown, recipe latching, explicit uniform hold, discharge verification,
+> and separate DONE/ABORTED/FAULT outcomes. They do not validate a real
+> circuit, insulation system, motion sensor, supply, bath, or process.
 
 ---
 
@@ -66,23 +73,36 @@ Oxide growth is **field-driven**, following high-field Cabrera–Mott conduction
 
 Three consequences that drive the whole design:
 
-- **Color charts are voltage charts, not time charts.** Gold/bronze 10–18 V, purple 18–25 V, blue 30–40 V, gold again 50–55 V, teal and green 80–100 V ([DFocus](https://dfocusrp.com/resources/titanium-anodizing-color-chart/), [MonsterBolts](https://monsterbolts.com/pages/anodized-titanium-color-chart)). Red is not obtainable.
+- **Color charts are voltage-chart examples, not process limits.** The project
+  lists the 13 vendor swatch names and filename voltages in
+  [`anodizer-controller-design.md`](anodizer-controller-design.md#62-the-color-palette).
+  Validate actual colors on coupons for the alloy and bath in use.
 - **Dwell time barely matters.** Once the film has formed at a given voltage, holding longer changes almost nothing.
 - **The color is set by the highest voltage a point saw while wet, and it never thins back down.** The process is one-way.
 
-### 2.2 Therefore the voltage sweep must be monotonic
+### 2.2 Voltage changes map to carriage movement in both directions
 
-Because color records a peak and cannot be undone, the voltage must only ever increase during a run. The firmware tracks `v_peak = max(v_measured)` and treats a decrease as informational, not corrective. Physically retracting the part is harmless; reducing voltage to "fix" a color is impossible.
+The recipe table maps measured voltage to a carriage target continuously. An
+increase moves the carriage up; a decrease moves it down, with equal-band or
+linear scaling as selected. Per-section color remains based on the highest
+voltage seen while that section was wet, so reversing the carriage does not
+erase or lower an already formed color. This directional tracking is a
+simulator/reference behavior, not validation that a physical process can
+reliably reverse without defects.
 
 ### 2.3 The actuator cannot replace a programmable supply — but it can follow one
 
 **Rejected idea, worth recording because it is the obvious one.** The original hope was that a voltage-controlled linear actuator could produce a rainbow from a *fixed* supply voltage, dodging the cost of a programmable supply. It cannot. Every point on the part would see the same single voltage while wet, so the whole part comes out one color regardless of how it moved.
 
-What *is* valid is the inverse: couple position to voltage. At 0 V the part is fully submerged; as voltage rises the part withdraws, so each height is stamped with the voltage present when the waterline passed it. That converts a knob sweep into a spatial gradient, which is the design we built.
+The control loop couples the current voltage to position: as voltage rises the
+part withdraws, and if voltage is lowered the carriage returns deeper according
+to the same recipe map. Each wet section retains its peak-voltage history. That
+does not undo any finish already formed, and the process response requires
+coupon testing.
 
 ### 2.4 The operator turns the knob
 
-A programmable supply was priced and rejected (candidates included the GW Instek GPP-6030 and Chroma 6200-120; the cheap DPH8920 was disqualified because it caps at 96 V, below the green range). A motorized variac, HV boost modules, a DAC-driven external pass element with a 1 °C/W heatsink — all evaluated and dropped as either expensive, unsafe, or thermally awkward.
+A programmable supply was priced and rejected (candidates included the GW Instek GPP-6030 and Chroma 6200-120; the cheap DPH8920 was disqualified because it caps at 96 V, below the green range). Verify the required GPP tracking-series configuration: its main channels are individually 0–60 V, while 120 V requires the documented series-tracking arrangement. A motorized variac, HV boost modules, a DAC-driven external pass element with a 1 °C/W heatsink — all evaluated and dropped as either expensive, unsafe, or thermally awkward.
 
 The project already owns a **0–120 V DC / 3 A bench supply**. Hand-adjusting it is free. The controller's job becomes measuring rather than commanding, which is both cheaper and a smaller safety surface.
 
@@ -168,7 +188,9 @@ At constant voltage the trace is: **a sharp spike on application, an exponential
 
 - **Declare "formed" on the plateau, not on a fraction of peak.** The floor's absolute value shifts with part area, electrolyte conductivity and bath temperature — a warm bath leaks more. So watch `di/dt` and declare formed when current changes less than about 1% per second for 3–5 s, with a minimum dwell so noise on a steep decay cannot declare victory early.
 - **Current that refuses to taper is a fault, not a reason to wait.** It means electrolyte too conductive or contaminated, a parasitic leak path, or a voltage above breakdown where sparking sustains conduction indefinitely. Time out and fault.
-- **Peak current cross-checks the entered part length**, since peak current scales with wetted area. A gross mismatch means a mistyped length or a part that never fully submerged — caught before the color is committed.
+- **Peak current can be a calibrated cross-check only** for a known alloy, shape,
+  exposed area, bath conductivity, temperature, and current limit. It cannot by
+  itself validate entered length or prove full submersion.
 - **In GRADIENT mode the trace is a staircase**, because each knob increment produces its own spike and decay. These are low-frequency and the 1.6 kHz high-pass should reject them; confirm during calibration by deliberately jerking the knob.
 
 ---
@@ -191,13 +213,11 @@ Part length is entered in millimetres, 10–99 mm, persisted to flash and latche
 1. Set MODE to UNIFORM, enter part length, pick a color.
 2. Hold SELECT on RUN. The axis homes, finds the bath surface electrically, then submerges the part **deeper than gradient mode would**, since any part of the workpiece at or above the surface takes a different finish and a stray waterline band is the whole defect here.
 3. The display coaches you to the target voltage. Dial up; the buzzer stops when you are in the window.
-4. The part oscillates ±1 mm at about 0.5 Hz during formation. This sheds clinging hydrogen and oxygen bubbles, which otherwise leave streaks and comet marks — far more visible on a flat single color than on a gradient.
-5. Watch the taper bar. When formation completes, continue through the
-   coached run and use **BACK** for a graceful abort/retract.
-6. The current simulator and sketch do not treat dialing the supply to zero as
-   a motion command. A future zero-voltage extraction workflow would require a
-   separate validated state machine, discharge verification, and hardware
-   testing before being enabled.
+4. Bubble-management oscillation is a future experiment, not implemented controller behavior. Do not infer that the current simulator or Python sketch provides ±1 mm at 0.5 Hz or that it has been shown to improve finish quality.
+5. Watch the taper bar. When formation completes, the controller holds the
+   part fully submerged. Use **BACK** to request extraction; output shutdown,
+   electrode-pair discharge verification, and guarded retraction must complete
+   before access.
 
 **Why the current trigger is a button.** BACK makes the operator’s extraction
 intent explicit. A voltage drop can be accidental or caused by a fault, so the
@@ -244,9 +264,9 @@ Do not skip steps, and do not put electrolyte in the room before step 4.
 3. **Kill chain dry.** E-stop, lid switch, every firmware fault. Confirm Q1 opens and K1 drops every single time.
 4. **Resistive load.** Substitute a 220 Ω 100 W resistor for the bath. Short it for OVERCURRENT, open it for OPEN CIRCUIT, confirm the latch holds until acknowledged.
 5. **Arc-detector calibration.** Use a controlled injected transient or an enclosed, interlocked test fixture under qualified supervision; do not draw an open-bench arc. Set the ARC comparator threshold below the validated detection level, then confirm a normal 0→105 V ramp into the resistive load produces **zero** false trips.
-6. **Motion dry-run.** Empty tank. Watch for swing, twist and binding; confirm homing repeatability over ten cycles; verify commanded length against calipers at 10, 50 and 99 mm; confirm length survives a power cycle and BACK aborts cleanly.
+6. **Motion dry-run.** Empty tank. Watch for swing, twist and binding; confirm homing repeatability over ten cycles; verify commanded length against calipers at 10, 50 and 99 mm; validate actual-position feedback, loss-of-position handling, usable stroke, motor-power-loss behavior, and BACK aborts cleanly.
 7. **Flat coupons** at fixed voltages in 5 V steps, photographed against a ruler, to seed and then correct the palette windows. Pay extra attention above 70 V, where the display-piece recipes live and the windows are narrowest in volts.
-8. **UNIFORM mode on a coupon**, end to end including zero-volt extraction. This reduces the gradient-specific risk, but must not be treated as arc-free; all interlocks and output-discharge checks still apply.
+8. **UNIFORM mode on a coupon**, end to end including output-off, electrode-pair discharge verification, and guarded extraction. This reduces the gradient-specific risk, but must not be treated as arc-free; all interlocks and discharge checks still apply.
 9. **GRADIENT mode**, coached, on a coupon before a part anyone cares about.
 
 ---
@@ -289,7 +309,7 @@ Key line items remain indicative: [ADS1115 breakout](https://www.adafruit.com/pr
 - **Palette windows are literature values** ([DFocus](https://dfocusrp.com/resources/titanium-anodizing-color-chart/), [Hontitan](https://hontitan.com/how-to-anodize-titanium-at-home/)) and must be corrected against coupons from this bath, since electrolyte and alloy both shift them.
 - **Sweep speed is a guess** at 0.3–1.0 mm/s; the real band sharpness limit is meniscus behaviour and needs empirical work.
 - **Formation timeout and `di/dt` threshold** need real traces to set sensibly.
-- Process references: [AMS-2471](https://titanium.blog/standards/ams-2471/), [Caswell plating manual](https://tosih.org/files/books/caswell_inc_plating_manual.pdf).
+- Process references: AMS2471 is an aluminum-alloy anodizing standard and is removed as titanium guidance. Re-establish process values from titanium-specific evidence; [Caswell plating manual](https://tosih.org/files/books/caswell_inc_plating_manual.pdf) is background only.
 
 ---
 

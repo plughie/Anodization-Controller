@@ -47,6 +47,12 @@
     .control { margin: 16px 0 20px; }
     .control-head, .metric, .status-line, .toolbar { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
     .control-head { margin-bottom: 7px; }
+    .setpoint-head { display: flex; justify-content: space-between; gap: 8px; margin: 10px 0 6px; color: var(--muted); font-size: .78rem; }
+    .setpoints { position: relative; height: 34px; margin-bottom: 2px; }
+    .setpoint { position: absolute; top: 0; width: 14px; height: 34px; transform: translateX(-50%); cursor: help; }
+    .setpoint::before { content: ""; position: absolute; left: 1px; bottom: 0; width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; border-top: 9px solid var(--cyan); filter: drop-shadow(0 0 3px #56d6e988); }
+    .setpoint::after { content: attr(data-tooltip); position: absolute; left: 50%; bottom: 13px; transform: translate(-50%, -2px); padding: 4px 6px; border: 1px solid #397988; border-radius: 5px; background: #10232b; color: var(--text); font-size: .7rem; line-height: 1.1; white-space: nowrap; opacity: 0; pointer-events: none; transition: opacity .12s ease; z-index: 2; }
+    .setpoint:hover::after, .setpoint:focus-visible::after { opacity: 1; }
     .value { color: var(--cyan); font-variant-numeric: tabular-nums; font-weight: 600; }
     .muted { color: var(--muted); }
     input[type="range"] { width: 100%; accent-color: var(--cyan); }
@@ -137,6 +143,8 @@
         </div>
         <label class="control" for="voltage-input">
           <span class="control-head"><span>Voltage knob</span><span class="value"><span id="voltage-value">0</span> V</span></span>
+          <div class="setpoint-head"><span>Programmed setpoints</span><span>follow the ramp</span></div>
+          <div id="voltage-setpoints" class="setpoints" aria-label="Programmed voltage setpoints"></div>
           <input id="voltage-input" type="range" min="0" max="120" step="0.5" value="0">
         </label>
         <label class="control" for="current-input">
@@ -182,8 +190,20 @@
         <div class="button-row">
           <button class="primary" id="start-button" type="button">Start run</button>
           <button id="reset-button" type="button">Reset</button>
-          <button class="danger" id="fault-button" type="button">Inject fault</button>
+          <button class="danger" id="fault-button" type="button">Inject selected fault</button>
         </div>
+        <label class="control" for="fault-input"><span class="control-head"><span>Fault injection</span></span>
+          <select id="fault-input">
+            <option value="hardware-latch">Hardware trip latch</option>
+            <option value="q1-short">Q1 stuck short</option>
+            <option value="k1-welded">K1 welded closed</option>
+            <option value="stale-adc">Stale ADC readings</option>
+            <option value="open-contact">Open/broken cell contact</option>
+            <option value="overcurrent">Overcurrent condition</option>
+            <option value="motion-stall">Motion stall</option>
+            <option value="residual-charge">Slow discharge path</option>
+          </select>
+        </label>
         <p class="footer-note">Simulated front-panel controls:</p>
         <div class="button-row" aria-label="Simulated front-panel controls">
           <button class="primary" id="select-button" type="button">SELECT (hold 1 s)</button>
@@ -195,7 +215,7 @@
         <h2 id="interlock-heading">Interlocks</h2>
         <label class="switch"><input id="lid-input" type="checkbox" checked> Lid closed</label>
         <label class="switch"><input id="estop-input" type="checkbox" checked> E-stop released</label>
-        <p class="footer-note">The simulated output path requires both interlocks. Faults latch until reset.</p>
+        <p class="footer-note">Interlock trips latch until Reset. Output-off is followed by simulated electrode-pair discharge verification before motion.</p>
       </section>
     </aside>
 
@@ -272,318 +292,6 @@
   </div>
 </main>
 
-<script>
-(() => {
-  "use strict";
-  const palette = [
-    ["BRONZE", 15, 18, "#c17c4b"], ["VIOLET", 20, 25, "#8f5bc7"], ["BLUE", 30, 40, "#3f78e8"],
-    ["TEAL", 45, 50, "#24b6b1"], ["GOLD", 52, 58, "#e2b93d"], ["ROSE", 62, 68, "#df6d8a"],
-    ["MAGENTA", 75, 82, "#d744b8"], ["CYAN", 86, 92, "#45cbe6"], ["GREEN", 96, 104, "#61bd65"]
-  ];
-  const root = document.getElementById("anodizer-simulator");
-  const $ = (id) => document.getElementById(id);
-  const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
-  const mid = (color) => (color[1] + color[2]) / 2;
-
-  const els = {
-    voltage: $("voltage-input"), currentLimit: $("current-input"), supply: $("supply-output"),
-    mode: $("mode-input"), length: $("length-input"), start: $("start-input"), end: $("end-input"),
-    spread: $("spread-input"), lid: $("lid-input"), estop: $("estop-input"), startRun: $("start-button"),
-    reset: $("reset-button"), select: $("select-button"), back: $("back-button"), inject: $("fault-button"), state: $("state-label"), stateDot: $("state-dot"),
-    voltageValue: $("voltage-value"), currentValue: $("current-value"), lengthValue: $("length-value"),
-    knob: $("voltage-knob"), knobValue: $("voltage-knob-value"), oledState: $("oled-state"),
-    oled1: $("oled-line-1"), oled2: $("oled-line-2"), oled3: $("oled-line-3"), oled4: $("oled-line-4"), oled5: $("oled-line-5"),
-    metricVoltage: $("metric-voltage"), metricCurrent: $("metric-current"), metricPeak: $("metric-peak"), metricPosition: $("metric-position"),
-    carriage: $("carriage"), hanger: $("part-hanger"), part: $("titanium-part"), positionLabel: $("position-label"), travelLabel: $("travel-label"),
-    voltagePath: $("voltage-path"), currentPath: $("current-path"), log: $("event-log")
-  };
-
-  palette.forEach((color, index) => {
-    const option = document.createElement("option");
-    option.value = index; option.textContent = `${color[0]} (${color[1]}–${color[2]} V)`;
-    els.start.append(option.cloneNode(true)); els.end.append(option);
-  });
-  els.start.value = "6"; els.end.value = "8";
-
-  const sim = {
-    state: "IDLE", voltage: 0, currentLimit: 0.5, measuredVoltage: 0, measuredCurrent: 0,
-    peakVoltage: 0, position: 18, surfacePos: 62.4, fullySubmerged: 114.4, cutoff: 65.4,
-    travelSpan: 49, partLength: 47, frac: 0, formation: 0, coachIndex: 0, coachStable: 0, desiredVoltage: 0, fault: "", lastTime: performance.now(),
-    trace: [], log: []
-  };
-
-  function addLog(message) {
-    sim.log.unshift(`${new Date().toLocaleTimeString()}  ${message}`);
-    sim.log = sim.log.slice(0, 16);
-    els.log.innerHTML = sim.log.map((line) => `<div>${line}</div>`).join("");
-  }
-
-  function table() {
-    const start = Number(els.start.value), end = Number(els.end.value);
-    const band = palette.slice(Math.min(start, end), Math.max(start, end) + 1);
-    const centers = band.map(mid);
-    if (centers.length < 1 || start > end) return null;
-    if (els.spread.value === "LINEAR") return centers.length >= 2 ? [[centers[0], 0], [centers.at(-1), 1]] : null;
-    if (centers.length === 1) return [[centers[0], 0], [centers[0], 1]];
-    const points = [[centers[0], 0]];
-    for (let i = 1; i < centers.length; i++) points.push([(centers[i - 1] + centers[i]) / 2, i / centers.length]);
-    points.push([centers.at(-1), 1]);
-    return points;
-  }
-
-  function interpInverse(points, voltage) {
-    if (!points) return 0;
-    if (voltage <= points[0][0]) return points[0][1];
-    for (let i = 1; i < points.length; i++) {
-      if (voltage <= points[i][0]) {
-        const [v0, f0] = points[i - 1], [v1, f1] = points[i];
-        return f0 + (voltage - v0) * (f1 - f0) / Math.max(0.001, v1 - v0);
-      }
-    }
-    return points.at(-1)[1];
-  }
-
-  function interp(points, frac) {
-    if (!points) return 0;
-    const f = clamp(frac, 0, 1);
-    for (let i = 1; i < points.length; i++) {
-      if (f <= points[i][1]) {
-        const [v0, f0] = points[i - 1], [v1, f1] = points[i];
-        return v0 + (f - f0) * (v1 - v0) / Math.max(0.001, f1 - f0);
-      }
-    }
-    return points.at(-1)[0];
-  }
-
-  function recipeName() {
-    const s = palette[Number(els.start.value)], e = palette[Number(els.end.value)];
-    return s && e ? `${s[0]} → ${e[0]}` : "invalid recipe";
-  }
-
-  function colorForVoltage(voltage) {
-    if (!Number.isFinite(voltage) || voltage <= 0) return "#687784";
-    return palette.reduce((best, color) => Math.abs(mid(color) - voltage) < Math.abs(mid(best) - voltage) ? color : best)[3];
-  }
-
-  function partGeometry() {
-    const scale = 2.4;
-    const hangerOffset = 34;
-    const y = clamp(45 + (sim.position - 18) * scale, 28, 260);
-    const partTop = y + hangerOffset;
-    const partHeight = clamp(sim.partLength * scale, 24, 260);
-    const wetFraction = clamp((partTop + partHeight - 285) / Math.max(1, partHeight), 0, 1);
-    return { y, partTop, partHeight, wetFraction };
-  }
-
-  function renderPartColor() {
-    const neutral = "#687784";
-    const stops = Array.from({ length: 9 }, (_, index) => $(`part-stop-${index}`));
-    const recipeStart = palette[Number(els.start.value)];
-    const baselineColor = recipeStart ? recipeStart[3] : neutral;
-    const active = ["SETTLE", "SWEEP", "CLEAR", "DONE"].includes(sim.state);
-    const currentVoltage = sim.state === "CLEAR" || sim.state === "DONE" ? sim.peakVoltage : sim.measuredVoltage;
-    const currentColor = colorForVoltage(currentVoltage);
-    const startIndex = Number(els.start.value);
-    const endIndex = Number(els.end.value);
-    const recipeColors = startIndex <= endIndex ? palette.slice(startIndex, endIndex + 1) : [];
-    const setStop = (stop, offset, color, visible = true) => {
-      stop.setAttribute("offset", `${offset}%`);
-      stop.setAttribute("stop-color", color);
-      stop.style.display = visible ? "" : "none";
-    };
-    if (!active) {
-      stops.forEach((stop, index) => setStop(stop, index === 0 ? 0 : 100, neutral, index < 2));
-      return;
-    }
-    if (sim.state === "DONE" || sim.frac >= 0.999) {
-      const colors = els.spread.value === "LINEAR" && recipeColors.length > 1
-        ? [recipeColors[0], recipeColors.at(-1)]
-        : recipeColors.length > 1 ? recipeColors : [{ 3: baselineColor }];
-      colors.forEach((color, index) => {
-        const offset = els.spread.value === "LINEAR" && colors.length > 1
-          ? index === 0 ? 0 : index === colors.length - 1 ? 100 : (index / (colors.length - 1)) * 100
-          : (index / Math.max(1, colors.length - 1)) * 100;
-        setStop(stops[index], offset, color[3]);
-      });
-      for (let index = colors.length; index < stops.length; index++) setStop(stops[index], 100, neutral, false);
-      return;
-    }
-    const { wetFraction } = partGeometry();
-    const dryBoundary = Math.min(99.9, Math.max(0.1, (1 - wetFraction) * 100));
-    setStop(stops[0], 0, baselineColor);
-    setStop(stops[1], dryBoundary, baselineColor);
-    setStop(stops[2], dryBoundary, currentColor);
-    setStop(stops[3], 100, currentColor);
-    for (let index = 4; index < stops.length; index++) setStop(stops[index], 100, neutral, false);
-  }
-
-  function actualCell() {
-    if (!els.supply.checked || sim.state === "FAULT" || !els.lid.checked || !els.estop.checked) return [0, 0];
-    const immersion = clamp((sim.position - sim.surfacePos) / Math.max(1, sim.partLength), 0, 1);
-    const effectiveResistance = 180 + immersion * 180;
-    const touchdownSignal = sim.state === "TOUCHDOWN" && sim.position >= sim.surfacePos ? Math.min(0.08, sim.voltage / 900) : 0;
-    const formationFactor = sim.state === "SETTLE" || sim.state === "SWEEP" ? Math.max(0.01, 1 - 0.99 * sim.formation) : 1;
-    const current = Math.min(sim.currentLimit, Math.max(touchdownSignal, sim.voltage / effectiveResistance * (0.2 + immersion * 0.8) * formationFactor));
-    const measuredVoltage = sim.state === "SETTLE" || sim.state === "SWEEP"
-      ? Math.min(sim.voltage, sim.currentLimit * effectiveResistance)
-      : Math.min(sim.voltage, current * effectiveResistance);
-    return [measuredVoltage, current];
-  }
-
-  function fault(reason) {
-    sim.fault = reason; sim.state = "FAULT"; sim.measuredVoltage = 0; sim.measuredCurrent = 0;
-    els.supply.checked = false; addLog(`FAULT LATCHED: ${reason}`);
-  }
-
-  function startRun() {
-    if (sim.state !== "IDLE" && sim.state !== "DONE") return;
-    const points = table();
-    if (!points || !els.lid.checked || !els.estop.checked) { addLog("Start blocked: recipe or interlock invalid"); return; }
-    sim.partLength = Number(els.length.value);
-    sim.surfacePos = 62.4; sim.fullySubmerged = sim.surfacePos + sim.partLength + 5;
-    sim.cutoff = sim.surfacePos + 3; sim.travelSpan = sim.fullySubmerged - sim.cutoff;
-    sim.peakVoltage = 0; sim.position = 18; sim.frac = 0; sim.formation = 0; sim.coachIndex = 0; sim.coachStable = 0; sim.fault = ""; sim.state = "HOMING";
-    addLog(`Run started: ${recipeName()}, ${sim.partLength} mm`);
-  }
-
-  let selectHoldTimer = null;
-
-  function beginSelectHold(event) {
-    if (selectHoldTimer || (sim.state !== "IDLE" && sim.state !== "DONE")) return;
-    if (event.type === "keydown" && event.repeat) return;
-    event.preventDefault();
-    addLog("SELECT held; release after 1 second to start");
-    selectHoldTimer = setTimeout(() => {
-      selectHoldTimer = null;
-      startRun();
-    }, 1000);
-  }
-
-  function cancelSelectHold(event) {
-    if (!selectHoldTimer) return;
-    if (event) event.preventDefault();
-    clearTimeout(selectHoldTimer);
-    selectHoldTimer = null;
-  }
-
-  function reset() {
-    sim.state = "IDLE"; sim.fault = ""; sim.voltage = 0; sim.peakVoltage = 0; sim.measuredVoltage = 0; sim.measuredCurrent = 0;
-    sim.position = 18; sim.frac = 0; sim.formation = 0; sim.coachIndex = 0; sim.coachStable = 0; sim.trace = []; els.voltage.value = "0"; els.supply.checked = false; addLog("Controller reset");
-  }
-
-  function back() {
-    if (["HOMING", "TOUCHDOWN", "SETTLE", "SWEEP"].includes(sim.state)) {
-      sim.state = "CLEAR"; els.supply.checked = false; addLog("BACK pressed; output disabled and retracting");
-    } else {
-      addLog("BACK pressed; no active run");
-    }
-  }
-
-  function step(dt) {
-    sim.voltage = Number(els.voltage.value); sim.currentLimit = Number(els.currentLimit.value);
-    const [v, i] = actualCell(); sim.measuredVoltage = v; sim.measuredCurrent = i;
-    const points = table();
-    if (sim.state === "HOMING") { sim.position = 18; sim.state = "TOUCHDOWN"; addLog("Homing complete; searching for bath surface"); }
-    if (sim.state === "TOUCHDOWN") {
-      if (!els.lid.checked || !els.estop.checked) return fault("interlock opened during touchdown");
-      sim.position = Math.min(sim.fullySubmerged, sim.position + dt * 18);
-      if (v > 105) return fault("hardware voltage ceiling");
-      if (i > 0.012 && sim.position >= sim.surfacePos) { sim.surfacePos = sim.position; sim.fullySubmerged = sim.surfacePos + sim.partLength + 5; sim.cutoff = sim.surfacePos + 3; sim.travelSpan = sim.fullySubmerged - sim.cutoff; sim.state = "SETTLE"; sim.formation = 0; addLog("Touchdown found; fully submerging"); }
-      if (sim.position >= sim.fullySubmerged) sim.state = "SETTLE";
-    } else if (sim.state === "SETTLE") {
-      sim.position = sim.fullySubmerged; sim.formation = clamp(sim.formation + dt / 4, 0, 1); sim.desiredVoltage = points ? points[0][0] : 0;
-      if (!els.supply.checked || Math.abs(v - sim.desiredVoltage) > 2) { sim.state = "SETTLE"; }
-      else if (i < 0.003 && v > 1) { sim.state = "SWEEP"; addLog("Formation settled; sweep armed"); }
-    } else if (sim.state === "SWEEP") {
-      if (!els.lid.checked || !els.estop.checked) return fault("interlock opened during sweep");
-      sim.peakVoltage = Math.max(sim.peakVoltage, v);
-      const coached = els.mode.value === "COACHED";
-      if (coached) {
-        sim.desiredVoltage = points ? points[sim.coachIndex][0] : 0;
-        if (Math.abs(v - sim.desiredVoltage) <= 2 && v > 1) sim.coachStable += dt;
-        else sim.coachStable = 0;
-        if (sim.coachStable >= 1 && points && sim.coachIndex < points.length - 1) {
-          sim.coachIndex += 1; sim.coachStable = 0;
-          sim.desiredVoltage = points[sim.coachIndex][0];
-          addLog(`Coach target: dial ${sim.desiredVoltage.toFixed(1)} V`);
-        }
-        sim.frac = points ? points[sim.coachIndex][1] : 0;
-      } else {
-        sim.frac = clamp(interpInverse(points, sim.peakVoltage), 0, 1);
-        sim.desiredVoltage = interp(points, sim.frac);
-      }
-      const target = sim.fullySubmerged - sim.frac * sim.travelSpan;
-      const coachedHold = coached && Math.abs(v - sim.desiredVoltage) > 2;
-      if (!coachedHold) sim.position += clamp(target - sim.position, -dt * 22, dt * 22);
-      if (v > 105) return fault("hardware voltage ceiling");
-      if (i > sim.currentLimit * 1.05) return fault("overcurrent");
-      if (sim.position <= sim.cutoff) { sim.state = "CLEAR"; els.supply.checked = false; addLog("Cutoff reached; output disabled before separation"); }
-    } else if (sim.state === "CLEAR") {
-      sim.position = Math.max(sim.position - dt * 15, 18); if (sim.position <= 18) { sim.state = "DONE"; addLog("Run complete"); }
-    }
-    sim.trace.push([v, i]); if (sim.trace.length > 120) sim.trace.shift();
-  }
-
-  function renderScene() {
-    const { y, partTop, partHeight } = partGeometry();
-    els.carriage.setAttribute("y", y); els.hanger.setAttribute("y1", y + 25); els.hanger.setAttribute("y2", partTop); els.part.setAttribute("y", partTop);
-    els.part.setAttribute("height", partHeight);
-    els.positionLabel.textContent = `carriage: ${sim.position.toFixed(1)} mm`;
-    els.travelLabel.textContent = `part: ${sim.partLength} mm · bottom ${(sim.position + sim.partLength).toFixed(1)} mm`;
-    const cutoff = clamp(45 + (sim.cutoff - 18) * 2.4, 28, 260); document.querySelector("#cutoff-mark line").setAttribute("y1", cutoff); document.querySelector("#cutoff-mark line").setAttribute("y2", cutoff); document.querySelector("#cutoff-mark text").setAttribute("y", cutoff + 4);
-    els.metricPosition.textContent = `${sim.position.toFixed(1)} mm`;
-    renderPartColor();
-  }
-
-  function renderTrace() {
-    const width = 535, height = 120, x0 = 45, y0 = 25;
-    const vPath = sim.trace.map((p, i) => `${i ? "L" : "M"}${x0 + i / 119 * width},${y0 + height - p[0] / 120 * height}`).join(" ");
-    const iPath = sim.trace.map((p, i) => `${i ? "L" : "M"}${x0 + i / 119 * width},${y0 + height - p[1] / 3 * height}`).join(" ");
-    els.voltagePath.setAttribute("d", vPath); els.currentPath.setAttribute("d", iPath);
-  }
-
-  function render() {
-    const s = sim.state, faulted = s === "FAULT";
-    const activeRun = ["HOMING", "TOUCHDOWN", "SETTLE", "SWEEP", "CLEAR"].includes(s);
-    const displayedLength = activeRun ? sim.partLength : Number(els.length.value);
-    els.state.textContent = s; els.stateDot.className = `dot ${faulted ? "fault" : s === "IDLE" || s === "DONE" ? "idle" : ""}`;
-    els.voltageValue.textContent = sim.voltage.toFixed(1); els.currentValue.textContent = sim.currentLimit.toFixed(2); els.lengthValue.textContent = displayedLength;
-    els.knobValue.textContent = sim.voltage.toFixed(0); els.knob.style.setProperty("--pct", sim.voltage / 120);
-    els.metricVoltage.textContent = `${sim.measuredVoltage.toFixed(1)} V`; els.metricCurrent.textContent = `${sim.measuredCurrent.toFixed(3)} A`; els.metricPeak.textContent = `${sim.peakVoltage.toFixed(1)} V`;
-    els.oledState.textContent = faulted ? "FAULT LATCHED" : s === "IDLE" ? "READY" : s;
-    els.oledState.className = faulted ? "big fault" : "big";
-    els.oled1.textContent = `Output: ${els.supply.checked && !faulted ? "ENABLED" : "OFF"}`;
-    els.oled2.textContent = faulted ? sim.fault : s === "SWEEP" ? `Dial: ${sim.desiredVoltage.toFixed(1)} V` : s === "SETTLE" ? `Settle: ${sim.desiredVoltage.toFixed(1)} V` : "Set supply to 0 V";
-    els.oled3.textContent = `Length: ${displayedLength} mm`; els.oled4.textContent = `Recipe: ${recipeName()}`;
-    els.oled5.textContent = faulted ? "Reset required" : s === "SWEEP" ? `${els.mode.value === "COACHED" ? "Coached" : "Following"} / peak-tracked` : "Hold SELECT to begin";
-    renderScene(); renderTrace();
-  }
-
-  els.voltage.addEventListener("input", render); els.currentLimit.addEventListener("input", render);
-  els.length.addEventListener("input", () => {
-    if (sim.state === "IDLE" || sim.state === "DONE") sim.partLength = Number(els.length.value);
-    render();
-  });
-  [els.mode, els.start, els.end, els.spread, els.supply, els.lid, els.estop].forEach((el) => el.addEventListener("change", render));
-  els.startRun.addEventListener("click", startRun);
-  els.select.addEventListener("pointerdown", beginSelectHold);
-  els.select.addEventListener("pointerup", cancelSelectHold);
-  els.select.addEventListener("pointerleave", cancelSelectHold);
-  els.select.addEventListener("pointercancel", cancelSelectHold);
-  els.select.addEventListener("keydown", (event) => {
-    if (event.key === "Enter" || event.key === " ") beginSelectHold(event);
-  });
-  els.select.addEventListener("keyup", (event) => {
-    if (event.key === "Enter" || event.key === " ") cancelSelectHold(event);
-  });
-  window.addEventListener("blur", cancelSelectHold);
-  els.back.addEventListener("click", back); els.reset.addEventListener("click", reset); els.inject.addEventListener("click", () => fault("manual test fault"));
-
-  function loop(now) {
-    const dt = Math.min(0.08, Math.max(0.001, (now - sim.lastTime) / 1000)); sim.lastTime = now; step(dt); render(); requestAnimationFrame(loop);
-  }
-  addLog("Simulation ready"); render(); requestAnimationFrame(loop);
-})();
-</script>
+<script src="simulator.js"></script>
 </body>
 </html>
