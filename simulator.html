@@ -44,6 +44,9 @@
     .hardware-id { color: var(--cyan); font-size: 1.05rem; font-weight: 650; }
     .pin-grid { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; margin-top: 12px; font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
     .pin-grid span:nth-child(odd) { color: var(--yellow); }
+    .display-card { margin-top: 14px; padding: 10px; border: 1px solid #397988; border-radius: 8px; background: #10232b; }
+    .display-card strong { color: var(--green); }
+    .display-card .display-status { color: var(--yellow); font-size: .78rem; margin-top: 5px; }
     .control { margin: 16px 0 20px; }
     .control-head, .metric, .status-line, .toolbar { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
     .control-head { margin-bottom: 7px; }
@@ -167,6 +170,12 @@
           <span>GP16/17</span><span>OLED I²C</span>
           <span>GP18–22</span><span>encoder, buttons, fault IRQ</span>
         </div>
+        <div class="display-card" aria-label="Target display hardware">
+          <strong id="display-target">SSD1306 128×64 OLED</strong>
+          <div id="display-bus">I²C · SDA GP16 · SCL GP17</div>
+          <div id="display-address">Address: 0x3C / 0x3D</div>
+          <div class="display-status" id="display-status">Ordered · $2.50 · browser framebuffer only</div>
+        </div>
         <p class="footer-note">Wireless is not used in this conceptual safety path.</p>
       </section>
 
@@ -261,7 +270,7 @@
 
         <div class="right-stack">
           <section class="oled" aria-label="Controller display">
-            <div class="oled-title">ANODIZER CTRL // CONCEPT MODEL</div>
+            <div class="oled-title">SSD1306 128×64 // SIMULATED FRAMEBUFFER</div>
             <div id="oled-state" class="big">READY</div>
             <div id="oled-line-1">Output: OFF</div>
             <div id="oled-line-2">Set supply to 0 V</div>

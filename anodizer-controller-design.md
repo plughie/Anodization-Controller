@@ -283,7 +283,7 @@ Three controls is the right number. The encoder scrolls fields and values, SELEC
 
 Part length is a numeric field on the main screen, adjusted with the encoder in 1 mm steps over a **10–99 mm** range. Sub-10 mm parts aren't the use case, and the ceiling matches your stated working envelope.
 
-Because an encoder is relative rather than absolute, **persist the value to flash** on every commit and reload it at boot. In practice you anodize several similar parts in a session, so the machine coming up already showing 47 mm is the common case and the field often needs no touching at all.
+Because an encoder is relative rather than absolute, **persist the value to nonvolatile storage** on every commit and reload it at boot. The planned 24C16 provides a small, MCU-independent store for the current length, calibration coefficients, recipe slots, geometry, and configuration, so those values survive replacing the Pico with another Pico or an ESP32. Use a versioned record with CRC and conservative write coalescing/wear management; do not treat it as a high-rate event log. In practice you anodize several similar parts in a session, so the machine coming up already showing 47 mm is the common case and the field often needs no touching at all.
 
 The tradeoff against a potentiometer is worth naming: a pot would be absolute and glanceable across the room, but it drifts, it can be knocked mid-run, and it cannot land exactly on an integer without hysteresis games. The encoder gives exact integers, no drift, and one consistent input vocabulary for the whole interface. Given the OLED is already there to display the value, absolute knob position buys little.
 
@@ -446,24 +446,78 @@ These are conceptual software contracts. They do not replace a hardware watchdog
 
 ## 8. Bill of materials
 
+### Prototype package and purchase-status overlay
+
+This overlay records the mounting form that is currently intended for the
+breadboard prototype. **THT** means the selected part or breakout can present
+through-hole pins; an IC mounted on a breakout may still be SMT. **TBD** means
+the exact orderable package has not been selected, so the BOM does not assume
+that a through-hole version exists. Purchase status is based only on explicit
+project decisions, not on a part being discussed or priced.
+
+| Component | Qty | Mounting/package for prototype | Purchase status |
+|---|---:|---|---|
+| Raspberry Pi Pico WH | 1 | THT breadboard interface via pre-soldered headers; module electronics are SMT | **Received** |
+| ADS1115 Adafruit breakout | 1 | THT-capable with included 0.1 in header; ADC and support parts are SMT | **Purchased** |
+| SSD1306 128×64 display module | 1 | Module/header format; exact SPI-versus-I²C board and header installation must be verified | **Ordered** |
+| 24C16 I²C EEPROM, DIP-8/THT | 1 | THT nonvolatile storage for calibration coefficients, recipe slots, geometry, and other MCU-independent settings; 16-Kbit capacity is not intended for high-rate logs | **Unpurchased** |
+| EC11 encoder with knob | 1 | THT panel/breadboard pins; integrated push switch | **Ordered** |
+| 6×6 mm tactile switch assortment | 1 kit | THT, 4-pin momentary switches | **Ordered**; individual BACK switch TBD |
+| ISO1541DR | 1 | SMT SOIC-8; use a SOIC-to-DIP breakout for breadboard work | Not confirmed |
+| TRACO TMR 0522 (user reports marking/order as “TMR 3-0522”) | 1 | THT SIP-8 isolated module if this is the TMR 0522 variant | **Purchased**; exact MPN/marking to confirm |
+| 24 V-to-5 V buck converter | 1 | Module or PCB; exact package TBD | TBD |
+| 3V3 regulator ≥15 V input | 1 | Package TBD; select a THT regulator/module for breadboard prototype | TBD |
+| Divider resistors and shunt | 1 set | THT versions available; exact resistor power/package TBD | Not confirmed |
+| BAT54 assortment (listing labels include BAT54SW/BAT54SWT1G/BAT54S) | 1 assortment | Mixed package assortment; user-supplied photo confirms through-hole components are included, but the exact BAT54 variant/package still needs identification | **Purchased** |
+| Piezo buzzer | 1 | THT/wired component | **Purchased** |
+| Buzzer transistor and resistors | 1 set | Package TBD | Not confirmed |
+| Arc/current-sense front end | 1 | Module/through-hole prototype circuit preferred; exact implementation TBD | TBD |
+| Comparators | 2 | DIP THT versions are possible; exact IC/package not selected | TBD |
+| 74HC74 SR latch | 1 | DIP THT version assumed for breadboard prototype | **Purchased** |
+| 74HC32 logic OR | 1 | DIP THT version assumed for breadboard prototype | **Purchased** |
+| ISO7710F | 1 | SMT package; use an adapter or choose a THT isolator module | Not confirmed |
+| PCF8574 I²C expander | 1 | DIP THT version assumed for breadboard prototype | **Purchased** |
+| Fail-off coil driver | 1 | THT-friendly driver circuit possible; exact parts TBD | TBD |
+| DC fuse and holder | 1 | Holder is panel/chassis or THT depending selection | TBD |
+| IRFP460 Q1 | 1 | TO-247 THT power package | Not confirmed |
+| 2N7002 and gate resistors | 1 set | 2N7002 is normally SOT-23 SMT; choose a THT substitute or adapter for breadboard use | Not confirmed |
+| K1 DC-rated contactor/relay | 1 | Chassis/terminal wiring, not a breadboard component | TBD |
+| K1 coil driver and flyback diode | 1 set | THT-friendly driver circuit possible; exact parts TBD | Not confirmed |
+| BAOMAIN mushroom E-stop | 1 | Panel-mount, screw-terminal wiring; not PCB/breadboard-mounted | Not confirmed ordered |
+| NC lid interlock | 1 | Wired/panel-mount microswitch | Not confirmed |
+| Ballast and bleed resistors | 1 set | Chassis/THT power components; ratings and packages TBD | Not confirmed |
+| NEMA 17, TMC2209, endstops | 1 set | Motor and switches are wired; TMC2209 module is THT-header breadboardable with SMT driver IC | Not confirmed |
+| Carriage/frame/tank/enclosure hardware | 1 set | Mechanical/chassis hardware, not PCB-mounted | Not confirmed |
+| 24 V brick and HV test leads | 1 set | External wired equipment | Not confirmed |
+| Board headers and ribbon cable | 1 set | THT headers; cable/harness assembly | TBD |
+| KUAIQU SPPS-D1203-232 | 1 | External bench supply with terminals | **Ordered; not received/tested** |
+
+The ADS1115 status is now treated as purchased. Adafruit describes the
+breakout as fully assembled with a supplied 0.1 in header for breadboard or
+perfboard use, while the ADS1115 circuitry itself is surface-mount
+([Adafruit product page](https://www.adafruit.com/product/1085)). The
+ISO1541DR package is SOIC-8 according to TI, so it is not directly
+breadboardable without an adapter ([TI package listing](https://www.ti.com/product/ISO1541/part-details/ISO1541DR)).
+
 ### Sensing and control
 
 | Qty | Part | Purpose | Approx. each |
 |---:|---|---|---:|
 | 1 | Raspberry Pi Pico WH (RP2040, headers + wireless) | Controller | price TBD ([Raspberry Pi](https://www.raspberrypi.com/products/raspberry-pi-pico/)) |
-| 1 | ADS1115 16-bit ADC breakout | Cell voltage, shunt current | $15 ([Adafruit](https://www.adafruit.com/product/1085)) |
+| 1 | ADS1115 16-bit ADC breakout | Cell voltage, shunt current; THT-capable breakout with SMT ADC | $15; **purchased** ([Adafruit](https://www.adafruit.com/product/1085)) |
 | 1 | ISO1541DR | Isolated I²C barrier | ~$3 |
-| 1 | TRACO TMR 0522 (5 V → ±12 V, 2 W) | Isolated sense-side supply | ~$20 |
+| 1 | TRACO TMR 0522 / reported “TMR 3-0522” (5 V → ±12 V, 2 W) | Isolated sense-side supply | **Purchased; verify exact MPN** |
 | 1 | 24 V-to-5 V buck converter | Logic-board and TMR input rail | TBD |
 | 1 | 3V3 regulator rated for ≥15 V input | 3V3 on sense side from +12 V | TBD |
 | 3 | 330 kΩ 1% 1/4 W metal film | HV divider string | ~$0.30 |
 | 1 | 24.9 kΩ 0.1% | Divider bottom leg | ~$1 |
 | 1 | 0.1 Ω 3 W sense resistor | Shunt | ~$2 |
-| 1 | BAT54S | ADC clamp | ~$0.30 |
+| 1 assortment | BAT54 assortment (listing labels include BAT54SW/BAT54SWT1G/BAT54S) | ADC clamp candidates; mixed THT/SMT assortment with through-hole components included; identify the selected diode before wiring | **Purchased** |
 | 1 | SSD1306 128×64 I²C OLED | Recipe editor, band preview, live coaching | ~$8 |
-| 1 | Rotary encoder, detented, + knob | Scroll fields and values | ~$4 |
-| 2 | Momentary pushbutton (SELECT, BACK) | Navigation; SELECT-hold starts a run | ~$2 |
-| 1 | Piezo buzzer + transistor | Out-of-tolerance chirp, fault alert | ~$1 |
+| 1 | 24C16 I²C EEPROM, DIP-8/THT | Persist calibration results, recipe slots, geometry, counters, and configuration across Pico/ESP32 replacement | **Unpurchased** |
+| 1 | EC11 incremental rotary encoder with integrated push switch and knob | Scroll fields and values; encoder push is the planned SELECT input | Ordered; cost recorded by user |
+| 1 kit | 6×6 mm tactile pushbutton assortment, 250 pieces / 10 heights, 4-pin momentary NO | Candidate BACK button; exact height and individual switch remain TBD | $8.49 kit ([Amazon listing](https://www.amazon.com/dp/B0FLGZB3VP)) |
+| 1 | Piezo buzzer + transistor | Out-of-tolerance chirp, fault alert; buzzer purchased, transistor not confirmed | Buzzer **purchased**; transistor TBD |
 
 ### Arc and fault detection (sense board)
 
@@ -471,10 +525,10 @@ These are conceptual software contracts. They do not replace a hardware watchdog
 |---:|---|---|---:|
 | 1 | Current-sense / arc front end with validated gain and headroom | Fast shunt protection path; exact part TBD | TBD |
 | 2 | LM393 / TLV3502 dual comparator | Four trip channels | ~$1.50 |
-| 1 | 74HC74 or CD4043 | SR latch, holds the trip | ~$0.60 |
-| 1 | 74HC32 or diode-OR network | Channel combining | ~$0.50 |
+| 1 | 74HC74 or CD4043 | SR latch, holds the trip; 74HC74 purchased | 74HC74 **purchased** |
+| 1 | 74HC32 or diode-OR network | Channel combining; 74HC32 purchased | 74HC32 **purchased** |
 | 1 | ISO7710F single-channel digital isolator | Low-default OUTPUT ENABLE across the barrier | ~$2.50 |
-| 1 | PCF8574 I²C expander + fail-off coil driver | Latch status/reset and K1 coil on the sense side | TBD |
+| 1 | PCF8574 I²C expander + fail-off coil driver | Latch status/reset and K1 coil on the sense side; PCF8574 purchased, driver TBD | PCF8574 **purchased**; driver TBD |
 | 1 | Coordinated DC fuse + holder | Last-resort anode lead protection | TBD |
 | — | 10 nF / 10 kΩ high-pass, trim pots for thresholds | Arc-channel tuning | ~$4 |
 | — | Passives, headers, perfboard or small PCB | | ~$15 |
@@ -487,7 +541,7 @@ These are conceptual software contracts. They do not replace a hardware watchdog
 | 1 | 2N7002 + gate resistors (E-stop gate pulldown) | ~$0.50 |
 | 1 | DC-rated safety contactor/relay (K1), voltage/current rating TBD | TBD |
 | 1 | ULN2003 or MOSFET + flyback diode for coil | ~$1 |
-| 1 | Latching NC mushroom E-stop | ~$12 |
+| 1 | BAOMAIN red mushroom E-stop station, 1NO + 1NC, twist reset | Prototype hardwired E-stop input; NC contact opens K1 coil circuit and drives the Q1 gate pulldown; NO contact is non-safety status only | $9.99 ([Amazon listing](https://www.amazon.com/dp/B00NTT91Y0)) |
 | 1 | NC lid interlock microswitch | ~$4 |
 | 1 | Ballast resistor, value/rating TBD by fault-energy calculation | TBD |
 | 1 | 100 kΩ 2 W bleed resistor | ~$1 |

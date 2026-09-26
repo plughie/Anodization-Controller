@@ -28,6 +28,16 @@
     POSITION_TOLERANCE: 0.1, POSITION_FAULT_TOLERANCE: 2, POSITION_FAULT_TIME: 3,
     CLEARANCE: 5, ARC_MARGIN: 3, SECTION_COUNT: 9
   };
+  const DISPLAY_TARGET = {
+    controller: "SSD1306",
+    resolution: "128×64",
+    bus: "I²C",
+    sda: "GP16",
+    scl: "GP17",
+    addresses: ["0x3C", "0x3D"],
+    status: "ordered / browser simulation only",
+    price: "$2.50"
+  };
 
   const $ = (id) => document.getElementById(id);
   const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
@@ -47,6 +57,13 @@
     part: $("titanium-part"), positionLabel: $("position-label"), travelLabel: $("travel-label"), voltagePath: $("voltage-path"),
     currentPath: $("current-path"), log: $("event-log")
   };
+
+  // This describes the ordered module, but deliberately does not claim a
+  // physical I²C connection. The browser OLED below is only a framebuffer
+  // representation until Pico firmware and a hardware bring-up test exist.
+  root.dataset.displayTarget = `${DISPLAY_TARGET.controller}-${DISPLAY_TARGET.resolution}`;
+  root.dataset.displayBus = DISPLAY_TARGET.bus;
+  root.dataset.displayAddress = DISPLAY_TARGET.addresses.join("/");
 
   palette.forEach((color, index) => {
     const option = document.createElement("option");

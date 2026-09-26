@@ -68,6 +68,14 @@ class ConceptualContractTests(unittest.TestCase):
         self.assertIn('addLog(`Q1/K1 commanded off; verifying electrode discharge', simulator)
         self.assertIn("TOUCHDOWN_TIMEOUT: 240", simulator)
 
+    def test_simulator_identifies_the_ordered_display_target(self):
+        html = (ROOT / "simulator.html").read_text()
+        simulator = (ROOT / "simulator.js").read_text()
+        for token in ("SSD1306 128×64", "I²C", "SDA GP16", "SCL GP17", "0x3C / 0x3D", "$2.50"):
+            self.assertIn(token, html)
+        for token in ('controller: "SSD1306"', 'resolution: "128×64"', 'bus: "I²C"', 'sda: "GP16"', 'scl: "GP17"'):
+            self.assertIn(token, simulator)
+
 
 if __name__ == "__main__":
     unittest.main()
